@@ -1,0 +1,66 @@
+#!/bin/bash
+#/* *-* mode: sh-mode *-* /*
+
+flag=0
+
+if [ ! -z "$(find input/ -name \*.ini)" ];then
+    echo -n "deleting old inputs..."
+    rm input/*.ini
+    echo "done."
+    flag=1
+fi
+
+if [ ! -z "$(ls output)" ];then
+    echo -n "deleting output..."
+    rm -r output/*
+    echo "done."
+    flag=1
+fi
+
+if [ ! -z "$(ls bin)" ];then
+    echo -n "deleting binaries..."
+    rm bin/*
+    echo "done."
+    flag=1
+fi
+ 
+if [ ! -z "$(find checkpoints/ -name \*.break)" ];then
+    echo -n "deleting checkpoints..."
+    rm checkpoints/*.break
+    echo "done."
+    flag=1
+fi
+
+if [ ! -z "$(find src/ -name \*.o)" ];then
+    echo -n "cleaning up object files..."
+    rm src/*.o
+    echo "done."
+    flag=1
+fi
+
+if [ ! -z "$(find src/ -name \*.mod)" ];then
+    echo -n "cleaning up module files..."
+    rm src/*.mod
+    echo "done."
+    flag=1
+fi
+
+if [ -z "input/LESinputs.txt" ];then
+    echo -n "removing LESinputs.txt..."
+    rm input/LESinputs.txt
+    echo "done."
+    flag=1
+fi
+
+if [ -e "jobsub" ];then
+    echo -n "removing job submission script..."
+    rm jobsub
+    echo "done."
+    flag=1
+fi
+
+if [ "$flag" = "0" ];then
+    echo "nothing to clean up...exiting."
+fi
+
+exit 0

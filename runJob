@@ -1,0 +1,483 @@
+#!/bin/bash
+#/* *-* mode: sh-mode *-* */ #bash syntax highlighting in emacs
+
+#INPUTS
+NPROCS=96
+WALLTIME=6:00 #(HH:MM)
+EMAIL='ahsan.mecha@gmail.com'
+MAX_RESUBS=5
+RESUB_FLAG=0
+#RESUB_FLAG=0: start from scratch and don't resubmit (clears output)
+#RESUB_FLAG=1: start from scratch and resubmit until finished (clears output)
+#RESUB_FLAG=2: start from break files and resubmit until finished
+
+QUEUE=stoll
+#CHPC queues
+#1. stoll or leave blank (default)
+#2. smithp-guest (ember)
+#3. owner-guest (ember)
+#4. preemptable (updraft)
+#NCAR queues
+#1. regular
+#2. small
+#3. capability
+#4. premium
+#5. economy
+#6. small
+#7. standby
+
+#----------------------------------------------------------------------
+#-------------------------BEGIN SCRIPT---------------------------------
+#----------------------------------------------------------------------
+
+#determine what machine we're using
+echo -n "checking what system we're on..."
+if [ ! -z "$MACHINEID" ];then
+    SYSTEMID=`echo $MACHINEID`
+    if [[ "$SYSTEMID" != "chpc" ]] && [[ "$SYSTEMID" != "ncar" ]]; then
+	echo $SYSTEMID
+	echo -e "\e[00;31mInvalid MACHINEID: $MACHINEID. Valid values are 'chpc' or 'ncar'.\e[00m"
+	exit 1
+    fi
+else 
+    echo "failed."
+    echo "MACHINEID environmental variable not set."
+    echo -n "Enter machine ID (chpc, ncar, (q)uit):"
+    read MACHINEID
+    if [[ "$MACHINEID" = "q" ]] || [[ "$MACHINEID" = "quit" ]];then
+	exit 1
+    fi 
+    if [[ "$MACHINEID" != "chpc" ]] && [[ "$MACHINEID" != "ncar" ]]; then
+	echo "Invalid choice...exiting."
+    fi
+    SYSTEMID=$MACHINEID
+fi
+echo $SYSTEMID
+
+#compile the code
+echo -n "would you like to re-compile the code? [y/N]: "
+read RECOMPILE
+if [ "$RECOMPILE" = y ];then
+   echo -n "recompiling..."
+   make clean &> /dev/null
+   make &> /dev/null
+   if [ -e 'bin/LES2' ];then
+      echo "done."
+   else
+      echo "failed."
+      echo -e "\e[00;31mERROR: binary was not created.\e[00m"
+      exit 1
+   fi 	      
+fi
+if [ ! -e 'bin/LES2' ];then
+    echo -n "executable not found. [(R)ECOMPILE/(q)uit]: "
+    read RECOMPILE
+    if [[ "$RECOMPILE" = 'R' ]] || [[ "$RECOMPILE" = 'r' ]] || [[ "$RECOMPILE" = '' ]];then
+	echo -n "recompiling..."
+	make clean &> /dev/null
+	make &> /dev/null
+	echo "done."
+    else
+	exit 1
+    fi
+fi
+
+#generate inputs
+echo -n "would you like to generate input files? [y/N]: "
+read GENINPUTS
+if [ "$GENINPUTS" = 'y' ];then
+   if [ -e 'input/init.m' ];then
+      echo -n "generating input files..."
+      cd input
+      matlab -nodesktop -nosplash < init.m &> matlab.log
+      if [ ! -e vel.ini ];then
+	  echo "failed."
+	  echo -e "\e[00;31mERROR: input generation failed. See log file: input/matlab.log \e[00m"
+	  cd ..
+	  exit 1
+      fi
+      rm matlab.log
+      cd ..
+      echo "done."
+   else
+	echo -e "\e[00;31mERROR: input/init.m does not exist...exiting.\e[00m"
+   	exit 1
+   fi
+fi
+
+#calculate hprocs
+echo -n "calculate hprocs? [y/N]: "
+read CALCHPROCS
+if [ "$CALCHPROCS" = 'y' ];then
+    cd utilities
+    ./calc_hprocs -n $NPROCS
+    cd ..
+    if [ $? == '1' ];then
+	exit 1
+    fi
+fi
+
+#determine number of processors per node
+if [ "$MACHINEID" = 'chpc' ];then
+    echo -n "checking what cluster we're on..."
+    if [ "$UUFSCELL" = "updraft.arches" ];then
+    	CLUSTER='updraft'
+    	echo $CLUSTER
+    elif [ "$UUFSCELL" = "ember.arches" ];then
+    	CLUSTER='ember'
+    	echo $CLUSTER
+    elif [ "$UUFSCELL" = "kingspeak.peaks" ];then
+    	CLUSTER='kingspeak'
+    	echo $CLUSTER
+    else
+    	echo "failed."
+    	echo -e "\e[00;31mERROR: Invalid cluster.\e[00m"
+    	exit 1
+    fi
+
+    echo -n "determining number of processors per node..."
+    if [ $CLUSTER = 'updraft' ];then
+    	PPN=8
+    elif [ $CLUSTER = 'ember' ];then
+    	PPN=12
+    elif [ $CLUSTER = 'kingspeak' ];then
+    	PPN=16
+    fi
+    echo $PPN
+elif [ "$MACHINEID" = 'ncar' ];then
+    echo -n "determining number of processors per node..."
+     PPN=16
+    echo $PPN
+fi
+
+#build job submission script
+echo -n "building job submission script..."
+if [ "$MACHINEID" = "chpc" ];then
+
+    NODES=`echo "scale=2; $NPROCS/$PPN" | bc | awk '{printf "%d\n", $0+=$0<0?0:0.9}'`
+
+    echo '#\!/bin/tcsh' > jobsub
+    echo "#PBS -l nodes="$NODES":ppn="$PPN",walltime="$WALLTIME':00' >> jobsub
+    if [ "$QUEUE" = "stoll" ];then
+	echo "#PBS -A stoll" >> jobsub
+    elif [[ "$QUEUE" = "smithp-guest" ]] && [[ "$CLUSTER" = 'ember' ]];then
+	echo "#PBS -A smithp-guest" >> jobsub
+    elif [[ "$QUEUE" = "owner-guest" ]] && [[ "$CLUSTER" = 'ember' ]];then
+	echo "#PBS -A owner-guest" >> jobsub
+    elif [[ "$QUEUE" = "preemptable" ]] && [[ "$CLUSTER" = 'updraft' ]];then
+	echo "#PBS qos=preemptable" >> jobsub
+    fi	
+    echo '#PBS -m abe' >> jobsub
+    if [ ! -z "$EMAIL" ];then
+	echo "#PBS -M $EMAIL" >> jobsub
+    fi
+    echo ' ' >> jobsub
+    echo "cd `pwd`" >> jobsub
+    echo "mpiexec.hydra -np $NPROCS "'-machinefile $PBS_NODEFILE bin/LES2' >> jobsub
+
+elif [ "$MACHINEID" = "ncar" ];then
+
+    if [[ "$QUEUE" != 'regular' ]] && [[ "$QUEUE" != 'economy' ]] && [[ "$QUEUE" != 'capability' ]] && [[ "$QUEUE" != 'premium' ]] && [[ "$QUEUE" != 'small' ]] && [[ "$QUEUE" != 'standby' ]];then
+	echo -e "\e[00;31mERROR: Invalid queue...exiting.\e[00m"
+	exit 1
+    fi
+
+    echo -e '#!/bin/tcsh\n' > jobsub
+    echo '#BSUB -P UUSL0001' >> jobsub
+    echo '#BSUB -W '"$WALLTIME" >> jobsub
+    echo '#BSUB -n '"$NPROCS" >> jobsub
+    echo '#BSUB -R '"\"span[ptile=$PPN]\"" >> jobsub
+    echo '#BSUB -o yellowstone.%J.out' >> jobsub
+    echo '#BSUB -e yellowstone.%J.err' >> jobsub
+    echo '#BSUB -q '"$QUEUE" >> jobsub
+    echo '#BSUB -cwd '"`pwd`" >> jobsub
+    if [ ! -z "$EMAIL" ];then
+	echo '#BSUB -u '"$EMAIL" >> jobsub
+	echo '#BSUB -B' >> jobsub
+	echo '#BSUB -N' >> jobsub
+    fi
+    echo ' ' >> jobsub
+    echo 'mpirun.lsf bin/LES2' >> jobsub
+
+fi
+echo "done."
+
+#if we are only making the submission script, exit
+if [ "$ONLYSUBSCRIPT" = '1' ];then
+    exit 0
+fi
+
+if [ "$RESUB_FLAG" -lt 2 ]; then
+    echo -n "Are you sure you want to restart simulation from beginning? [y/N] "
+    read CHOICE
+
+    if [[ "$CHOICE" = "y" ]] || [[ "$CHOICE" = "Y" ]];then
+	echo -n "Resetting simulation..."
+	if [ ! -z "$(ls output)" ];then
+	    rm -r output/*
+	fi
+ 	sed -e 's/^.*inituA.*$/0 \t\t\t= inituA, momentum flag for resubmission (0=newjob, 1=resubmitted)/' input/LESinputs.txt > tempfile;mv tempfile input/LESinputs.txt
+ 	#sed -e 's/^.*initsA.*$/0 \t\t\t= initsA, scalar flag for resubmission (0=newjob, 1=resubmitted)/' input/LESinputs.txt > tempfile;mv tempfile input/LESinputs.txt
+	echo -e "0\n0\n0" > checkpoints/break
+	echo "done."
+    elif [[ "$CHOICE" = "n" ]] || [[ "$CHOICE" = "N" ]] || [[ "$CHOICE" = '' ]];then
+	echo "overriding RESUB_FLAG value of $RESUB_FLAG, resuming previous simulation."
+    else
+	echo -e "\e[00;31mERROR: Unknown answer...exiting.\e[00m"
+	exit 1
+    fi
+else
+
+    echo -n "Resuming previous simulation..."
+
+    sed -e 's/^.*inituA.*$/1 \t\t\t= inituA, momentum flag for resubmission (0=newjob, 1=resubmitted)/' input/LESinputs.txt > tempfile;mv tempfile input/LESinputs.txt
+    #sed -e 's/^.*initsA.*$/1 \t\t\t= initsA, scalar flag for resubmission (0=newjob, 1=resubmitted)/' input/LESinputs.txt > tempfile;mv tempfile input/LESinputs.txt
+
+    echo "done."
+
+fi
+
+#submit initial job
+echo -ne "\e[00;32msubmitting job (1/$MAX_RESUBS)..."
+if [ "$SYSTEMID" = 'chpc' ];then
+    JOBID="`qsub jobsub`"
+    JOBID=`echo $JOBID | cut -f1 -d'.'`
+elif [ "$SYSTEMID" = 'ncar' ];then
+    JOBID=`bsub < jobsub`
+    JOBID=`echo $JOBID | awk -F '[<>]' '{print $2}'`
+fi
+echo -e "$JOBID.\e[00m"
+
+NUM_SUBS=0
+while [ "$NUM_SUBS" -lt "$MAX_RESUBS" ];do
+
+    NUM_SUBS=$(($NUM_SUBS + 1))
+
+    #set up jobspool path
+    if [ "$SYSTEMID" = 'chpc' ];then
+	if [ $CLUSTER = "updraft" ]; then 
+ 	    JOBSPOOL_OU= '~/.pbs_spool/'$JOBID'.uprm.privatearch.arches.OU'
+	    JOBSPOOL_ER= '~/.pbs_spool/'$JOBID'.uprm.privatearch.arches.ER'
+	elif [ $CLUSTER = "ember" ]; then 
+ 	    JOBSPOOL_OU= '~/.pbs_spool/'$JOBID'.emrm.privatearch.arches.OU'
+	    JOBSPOOL_ER= '~/.pbs_spool/'$JOBID'.emrm.privatearch.arches.ER'
+	elif [ $CLUSTER = "kingspeak" ]; then 
+ 	    JOBSPOOL_OU='~/.pbs_spool/'$JOBID'.kprm.ipoib.wasatch.peaks.OU'
+	    JOBSPOOL_ER='~/.pbs_spool/'$JOBID'.kprm.ipoib.wasatch.peaks.ER'
+	fi
+    elif [ "$SYSTEMID" = 'ncar' ];then
+	JOBSPOOL_OU=yellowstone.$JOBID.out
+	JOBSPOOL_ER=yellowstone.$JOBID.err
+    fi
+
+#------------IN THE QUEUE---------------#
+    #check if job is still running, if so sleep and check again later
+    echo -n "job is waiting in the queue..."
+    RUNNING_FLAG=0
+    while [ "$RUNNING_FLAG" = "0" ];do
+	sleep 20
+	if [ "$SYSTEMID" = "chpc" ];then
+ 	    STATUS=`checkjob $JOBID | grep State: | head -n 1 | cut -f2 -d' '`
+	    if [ "$STATUS" = "Running" ]; then
+ 		RUNNING_FLAG=1
+ 	    fi
+	elif [ "$SYSTEMID" = "ncar" ];then
+	    #check if job exists
+	    STATUS=`bjobs`
+	    if [ -z "$STATUS" ];then
+		RUNNING_FLAG=1
+	    fi
+	    #check if job is running
+	    STATUS=`bjobs $JOBID | grep RUN`
+	    if [ ! -z "$STATUS" ];then
+		RUNNING_FLAG=1
+	    fi
+	    #check if job is exiting
+	    STATUS=`bjobs $JOBID | grep EXIT`
+	    if [ ! -z "$STATUS" ];then
+		RUNNING_FLAG=1
+	    fi
+	fi
+    done
+    echo "done."
+
+#------------JOB IS RUNNING---------------#
+
+    echo -n "job is running..."
+    NSTEPS=`grep 'nsteps, number of timesteps' input/LESinputs.txt | cut -f1 -d'=' | tr -d '\t' | tr -d ' '`
+    OLD_TIME=0
+    STALL_FLAG=0
+    while [ "$RUNNING_FLAG" = "1" ] && [ "$STALL_FLAG" = "0" ];do
+	sleep 30
+
+	#update how many steps we've run
+	STEPSRUN=`tail -n 1 checkpoints/break | tr -d ' '`
+	echo -ne "\r\033[Kjob is running...$STEPSRUN/$NSTEPS steps"
+
+	#check if job is still in the queue
+	if [ "$SYSTEMID" = "chpc" ];then
+	    STATUS=`showq | grep $JOBID`
+	elif [ "$SYSTEMID" = "ncar" ];then
+	    STATUS=`bjobs 2> /dev/null | grep $JOBID`
+	fi
+
+	if [ -z "$STATUS" ];then
+	#job has stopped running
+	    #check again 5 more times to be sure
+	    RUNNING_FLAG=0
+	    CHECK_COUNT=1
+	    while [ "$CHECK_COUNT" -lt '6' ];do
+		if [ "$SYSTEMID" = "chpc" ];then
+		    STATUS=`showq | grep $JOBID`
+		elif [ "$SYSTEMID" = "ncar" ];then
+		    STATUS=`bjobs 2> /dev/null | grep $JOBID`
+		fi
+		if [ ! -z "$STATUS" ];then
+		    STATUS='RUNNING'
+		    RUNNING_FLAG=1
+		    CHECK_COUNT=5
+		fi
+		CHECK_COUNT=$(($CHECK_COUNT + 1))
+		sleep 5
+	    done
+	fi
+
+	#check for NaN error
+	NaN=`cat $JOBSPOOL_OU | grep 'NaN error'`
+	if [ ! -z "$NaN" ];then
+	    echo -e "\r\033[Kjob is running...failed."
+	    echo -e "\e[00;31mERROR: Velocity field is NaN...terminating job.\e[00m"
+	    if [ "$SYSTEMID" = "chpc" ];then
+		eval "qdel $JOBID &> /dev/null"
+	    elif [ "$SYSTEMID" = "ncar" ];then
+		eval "bkill $JOBID &> /dev/null"
+	    fi
+	    exit 1
+	fi
+
+	#check that output file is still being updated
+	STALL_FLAG=0
+	NEW_TIME=`ls -l --full-time $JOBSPOOL_OU | cut -f7 -d' ' | cut -f1 -d'.'`
+	if [ "$NEW_TIME" = "$OLD_TIME" ];then
+	    sleep 60
+	    NEW_TIME=`ls -l --full-time $JOBSPOOL_OU | cut -f7 -d' ' | cut -f1 -d'.'`
+	    if [ "$NEW_TIME" = "$OLD_TIME" ];then
+		sleep 600
+		NEW_TIME=`ls -l --full-time $JOBSPOOL_OU | cut -f7 -d' ' | cut -f1 -d'.'`
+		if [ "$NEW_TIME" = "$OLD_TIME" ];then	
+		    #check to make sure job is still in the queue
+		    if [ "$SYSTEMID" = "chpc" ];then
+			STATUS=`showq | grep $JOBID`
+		    elif [ "$SYSTEMID" = "ncar" ];then
+			STATUS=`bjobs 2> /dev/null | grep $JOBID`
+		    fi
+		    if [ ! -z "$STATUS" ];then
+			RUNNING_FLAG=0
+		    fi
+		    #check if job ran for full simulation (NSTEPS)
+		    STEPSRUN=`head -n 1 checkpoints/break | tr -d ' '`
+		    if [ "$STEPSRUN" -lt "$NSTEPS" ];then
+			STALL_FLAG=1
+		    fi
+		fi
+	    fi
+	else
+	    OLD_TIME=$NEW_TIME
+	fi
+
+    done
+
+    #------------JOB FINISHED---------------#
+
+    
+    if [ "$STALL_FLAG" = "1" ] && [ "$RUNNING_FLAG" = "1" ];then
+    	echo -e "\r\033[Kjob is running...failed."
+     	echo -e "\e[00;31mERROR: output file is no longer being updated...killing script.\e[00m"
+     	if [ "$SYSTEMID" = "chpc" ];then
+     	    eval "qdel $JOBID &> /dev/null"
+     	elif [ "$SYSTEMID" = "ncar" ];then
+     	    eval "bkill $JOBID &> /dev/null"
+     	fi
+     	exit 1
+    fi
+
+    echo -e "\r\033[Kjob is running...done."
+
+    if [ "$SYSTEMID" = "chpc" ];then
+	OUTFILE=`basename $JOBSPOOL_OU`
+	ERRFILE=`basename $JOBSPOOL_ER`
+    elif [ "$SYSTEMID" = "ncar" ];then
+	OUTFILE=$JOBSPOOL_OU
+	ERRFILE=$JOBSPOOL_ER
+    fi
+    echo -n "moving output files into place..."
+    eval "mv $OUTFILE output/"
+    eval "mv $ERRFILE output/"
+    OUTFILE="output/$OUTFILE"
+    ERRFILE="output/$ERRFILE"
+    echo "done."
+
+    #check for NaN error
+    NaN=`cat $OUTFILE | grep 'NaN error'`
+    if [ ! -z "$NaN" ];then
+	echo -e "\e[00;31mERROR: Velocity field is NaN...exiting.\e[00m"
+	exit 1
+    fi
+
+    #check if job ran for full simulation (NSTEPS)
+    echo -n "checking how many steps have been run..."
+    NSTEPS=`grep 'nsteps, number of timesteps' input/LESinputs.txt | cut -f1 -d'=' | tr -d '\t' | tr -d ' '`
+    STEPSRUN=`head -n 1 checkpoints/break | tr -d ' '`
+    echo "($STEPSRUN/$NSTEPS)"
+
+    if [ "$STEPSRUN" -ge "$NSTEPS" ];then
+	echo -e "\e[00;32mSimulation finished!\e[00m"
+	rm jobsub
+	exit 0
+    fi
+
+    #check if simulation reached a checkpoint
+    CHECKPOINT=`grep 'ruler, frequency of updating' input/LESinputs.txt | cut -f1 -d'='`
+
+    #if sim did't reach first checkpoint, kill script
+    echo -n "checking that we made it to a checkpoint..."
+    if [ "$STEPSRUN" -lt "$CHECKPOINT" ];then
+	echo "no."
+	echo -e "\e[00;31mERROR: Simulation did not reach a checkpoint...exiting.\e[00m"
+	exit 1
+    else
+	echo "yes."
+    fi
+
+    if [ "$RESUB_FLAG" = '0' ];then
+	exit 0
+    fi
+
+    sed -e 's/^.*inituA.*$/1 \t\t\t= inituA, momentum flag for resubmission (0=newjob, 1=resubmitted)/' input/LESinputs.txt > tempfile;mv tempfile input/LESinputs.txt
+    #sed -e 's/^.*initsA.*$/1 \t\t\t= initsA, scalar flag for resubmission (0=newjob, 1=resubmitted)/' input/LESinputs.txt > tempfile;mv tempfile input/LESinputs.txt
+
+    cat checkpoints/break
+
+    #resubmit
+    if [ "$NUM_SUBS" -lt "$MAX_RESUBS" ];then
+	echo -ne "\e[00;32msubmitting job ($(($NUM_SUBS+1))/$MAX_RESUBS)..."
+	if [ "$SYSTEMID" = 'chpc' ];then
+	    JOBID="`qsub jobsub`"
+	    JOBID=`echo $JOBID | cut -f1 -d'.'`
+	elif [ "$SYSTEMID" = 'ncar' ];then
+	    JOBID=`bsub < jobsub`
+	    JOBID=`echo $JOBID | awk -F '[<>]' '{print $2}'`
+	fi
+	echo -e "$JOBID.\e[00m"
+    fi
+
+done
+
+if [ "$NUM_SUBS" -ge "$MAX_RESUBS" ];then
+    echo -e "\e[00;32mMaximum number of resubmissions reached...exiting.\e[00m"
+    exit 0
+fi
+
+rm jobsub
+
+exit 0

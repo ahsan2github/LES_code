@@ -1,0 +1,11 @@
+function getBLH(auw, avw, atxz, atyz) result(BLH)
+    
+    use globals
+    use sundry
+    implicit none
+    
+    real(kind=8), dimension(:,:) :: auw, avw, atxz, atyz
+    real(kind=8), dimension(nzb) :: muw, mvw, u_shear, zh2 
+    real(kind=8) ::  a1, b1, a2, b2, a, outBLH ! output is BLH, BLH is defined in sundry module
+    integer(kind = 4) :: ind, i
+end function getBLH 

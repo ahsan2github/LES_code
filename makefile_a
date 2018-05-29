@@ -1,0 +1,15 @@
+objdir = obj
+bindir = bin
+all: 	| $(objdir)  $(bindir)
+	cd src; make
+
+debug:
+	cd src; make debug
+
+clean:
+	rm -f src/*.o src/*.mod bin/LES2
+
+$(objdir):
+	mkdir -p $@
+$(bindir) :
+	mkdir -p $@

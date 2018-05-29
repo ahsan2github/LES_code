@@ -1,0 +1,60 @@
+function getBLH(auw, avw, atxz, atyz) result(outBLH)
+    
+    use globals
+    use sundry
+    implicit none
+    
+    real(kind=8), dimension(:,:) :: auw, avw, atxz, atyz
+    real(kind=8), dimension(nzb) :: muw, mvw, u_shear, zh2 
+    real(kind=8) ::  a1, b1, a2, b2, a, outBLH ! output is BLH, BLH is defined in sundry module
+    integer(kind = 4) :: ind, i
+    muw = (sum(auw(:, 2:nzb+1),1) + sum(atxz(:, 2:nzb+1),1))/aNx
+    mvw = (sum(avw(:, 2:nzb+1),1) + sum(atyz(:, 2:nzb+1),1))/aNx
+    u_shear = (muw**2+mvw**2)**0.25;
+    zh2 = (/(i, i=(vfact*nzb),(vfact+1)*nzb-1,1)/)/real(Nz)
+    ! process 0 always contains the lowest portions of the boundary layer
+    if (me == 0) then 
+        groundShear = u_shear(1)        
+    end if
+    call MPI_BCAST(groundShear, 1, MPI_Double_Precision, 0, nall, ierr)
+    call MPI_BARRIER(nall,ierr)
+    write(*, *) 'groundShear : ', groundShear
+    do i=1, nzb
+        ! this if condition will be true for multiple processes
+        if (u_shear(i)**2 <= 0.05*groundShear**2) then
+            a1 = zH2(i)
+            b1 = u_shear(i)**2
+            ind = i
+            a2 = zh2(ind-1)
+            b2 = u_shear(ind-1)**2
+            a = a2 + (a1-a2)*(0.05*(groundShear**2)-b2)/(b1-b2)
+            BLH = a /0.95d0 ! non dimensional Boundary layer height
+            if(me-hfact == 0) call MPI_BCAST(BLH, 1, MPI_Double_Precision, me, nall, ierr)
+            ! BLH is nondimensionalized by l_z, not z_i, as formulated !!
+            outBLH = BLH
+            ! "me-hfact == 0" ensures that only one of the processes existing on the same vertical level 
+            ! where "u_shear(i)**2 <= 0.05*groundShear**2" is true can send 'BLH' to process 0            
+!            if(me-hfact == 0) call MPI_ISEND(BLH, 1, MPI_Double_Precision, 0, 101, nall, ierr)
+!            if(me == 0) then 
+!                call MPI_IRECV(BLH, 1, MPI_Double_Precision, MPI_ANY_SOURCE, 101, nall, MPI_STATUS_IGNORE, ierr)
+!                call MPI_BCAST(BLH, 1, MPI_Double_Precision, me, nall, ierr)
+!            end if
+            exit
+        end if        
+    end do
+    
+    write(*, *) 'BLH:', BLH
+end function getBLH
+
+
+
+
+! muw      = mauw+mtuw;
+! mvw      = mavw+mtvw;
+! u_sL     = (muw.^2+mvw.^2).^0.25;
+! u_s      = u_sL(1);
+! 
+! Ind = find(u_sL.^2 <= 0.05*(u_sL(1).^2));
+!     a1 = zH_2(Ind(1))*L_z; b1 = u_sL(Ind(1))^2; a2 = zH_2(Ind(1)-1)*L_z; b2 = u_sL(Ind(1)-1)^2;
+!     a = a2 + (a1-a2)*(0.05*(u_sL(1)^2)-b2)/(b1-b2); mBLA=a/0.95; clear Ind;
+!     display(['boundary layer height=',num2str(mBLA)])

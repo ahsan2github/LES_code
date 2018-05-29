@@ -1,0 +1,353 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import loadData as ld
+from itertools import cycle
+
+inparam = ld.readInput('../input/LESinputs.txt')
+dt = inparam['dt']
+Nx = inparam['Nx']
+Ny = inparam['Ny']
+Nz = inparam['Nz']
+p_count = inparam['p_count']
+u_star = inparam['u_star']
+Ugal = inparam['Ugal']
+Vgal = inparam['Vgal']
+aNx = inparam['aNx']
+
+z_i = inparam['z_i']
+l_z = inparam['l_z']
+dz = inparam['dz']
+h_canopy = inparam['h_canopy'];
+print("h_canopy: {0:.2f}".format(h_canopy));
+print("u_star: {0:.4f}".format(u_star));
+
+plt.rcParams['figure.figsize'] = (4, 3) # in inches(12 cm (3.3898 in) x 12 cm (3.3898 in))
+plt.rcParams['figure.facecolor'] = 'w'
+plt.rcParams['figure.edgecolor'] = 'w'
+plt.rcParams['figure.dpi'] = 80
+plt.rcParams['lines.linewidth'] = 2
+plt.rcParams['axes.labelsize'] = 9.0
+plt.rcParams['xtick.labelsize'] = 10.0
+plt.rcParams['ytick.labelsize'] = 10.0
+plt.rcParams['legend.fontsize'] = 12.0
+plt.rcParams['legend.markerscale'] = 1
+plt.rcParams['text.usetex'] = True
+addLeft = 0.2
+addBottom = 0.2
+
+
+kappa = inparam['kappa']
+print('Nx :', Nx, 'Ny :', Ny, 'Nz', Nz)
+if (aNx==1) :
+    # xy averaged quantities
+    # yxAvgdudz=<dudz>t,y,x
+    yxAvgdudz= ld.loadBin('../output/dudz.bin',Nz) * u_star / z_i;
+    nrow, ncol= yxAvgdudz.shape
+    print('Total time steps run: %f \n' % (p_count*nrow));
+    totalPhysicalTime = p_count*nrow*dt/ 3600; # hours
+    print('Total physical time the simulation was run for : %f hours \n' % (totalPhysicalTime));
+
+    hour2avg=totalPhysicalTime * 1.0/10.0; # Average over last one tenth of time
+    totalStepsToAvgAtEnd = np.floor(hour2avg * 3600 / p_count / dt );
+    start = np.int(nrow-totalStepsToAvgAtEnd);
+    endd = np.int(nrow+1);
+    print("start:endd === {0}, {1}".format(start,endd));
+    tyxAvgdudz = np.mean(yxAvgdudz[start:endd, :], 0);
+#    del yxAvgdudz
+
+    yxAvguw=ld.loadBin('../output/auw.bin',Nz) * u_star**2;  # yxAvguw=<uw>y,x
+    tyxAvguw = np.mean(yxAvguw[start:endd, :], 0);           # tyxAvguw=<uw>t,y,x
+#    del yxAvguw
+
+    yxAvgvw = ld.loadBin('../output/avw.bin',Nz) * u_star**2; # yxAvgvw=<vw>y,x
+    tyxAvgvw = np.mean(yxAvgvw[start:endd, :], 0);            # tyxAvguw=<uw>t,y,x
+#    del yxAvgvw
+
+    # turbulent stress values, tyxAvgtxz=<txz>t,y,x
+    yxAvgtxz=ld.loadBin('../output/atxz.bin',Nz) * u_star**2;
+    tyxAvgtxz = np.mean(yxAvgtxz[start : endd, :], 0);
+#    del yxAvgtxz
+
+    # turbulent stress values, tyxAvgtyz=<txz>t,y,x
+    yxAvgtyz=ld.loadBin('../output/atyz.bin',Nz) * u_star**2;
+    tyxAvgtyz = np.mean(yxAvgtyz[start:endd, :], 0);
+#    del yxAvgtyz
+
+    tyxAvgtxzT = tyxAvguw + tyxAvgtxz
+    print("tyxAvguw[0], tyxAvgtxz[0], tyxAvgtxzT[0] : {0:.4f},{1}, {2}".\
+           format(tyxAvguw[0], tyxAvgtxz[0], tyxAvgtxzT[0]))
+    tyxAvgtyzT = tyxAvgvw + tyxAvgtyz
+    tyxAvg_uw_vw_total= tyxAvgtxzT+ tyxAvgtyzT
+
+    yxAvgu = ld.loadBin('../output/au.bin',Nz) * u_star;
+    tyxAvgu=np.mean(yxAvgu[start:endd, :],0); # tyxAvgu=<u>t,y,x
+#    del yxAvgu
+
+    yxAvgv = ld.loadBin('../output/av.bin',Nz) * u_star;
+    tyxAvgv=np.mean(yxAvgv[start:endd, :],0); # tyxAvgv=<v>t,y,x
+#    del yxAvgv
+
+    yxAvgw = ld.loadBin('../output/aw.bin',Nz) * u_star;
+    tyxAvgw=np.mean(yxAvgw[start:endd, :],0); # tyxAvgw=<w>t,y,x
+#    del yxAvgw
+
+
+    yxAvgCs2 = ld.loadBin('../output/Cs2_ALL.bin',Nz);
+    tyxAvgCs2=np.mean(yxAvgCs2[start:endd, :],0); # tyxAvgCs2=<u>t,y,x
+#    del yxAvgCs2
+
+    # turbulent stat u'u', tyxAvguu=<u2>t,y,x
+    yxAvguu=ld.loadBin('../output/u2.bin',Nz) * u_star**2;
+    tyxAvguu = np.mean(yxAvguu[start : endd, :], 0);
+#    del yxAvguu
+
+    # turbulent stat v'v', tyxAvgvv=<v2>t,y,x
+    yxAvgvv=ld.loadBin('../output/v2.bin',Nz) * u_star**2;
+    tyxAvgvv = np.mean(yxAvgvv[start : endd, :], 0);
+#    del yxAvgvv
+
+    # turbulent stat w'w', tyxAvgww=<v2>t,y,x
+    yxAvgww=ld.loadBin('../output/w2.bin',Nz) * u_star**2;
+    tyxAvgww = np.mean(yxAvgww[start : endd, :], 0);
+#    del yxAvgww
+
+    # turbulent stat w'w'w', tyxAvgwww=<v2>t,y,x
+    yxAvgwww=ld.loadBin('../output/w3.bin',Nz) * u_star**3;
+    tyxAvgwww = np.mean(yxAvgwww[start : endd, :], 0);
+#    del yxAvgwww
+
+    # turbulent stat beta1, tyxAvgbeta=<beta1>t,y,x
+    yxAvgbeta=ld.loadBin('../output/beta1.bin',Nz) 
+    tyxAvgbeta = np.mean(yxAvgbeta[start : endd, :], 0);
+#    del yxAvgbeta
+
+    zforu = np.arange(0, Nz)*dz+dz/2;
+    nzforu = zforu/l_z;        # normalized z
+    z_norm_h = zforu/h_canopy;       # normalized by canopy height
+    timestamps = np.arange(yxAvguw[:, 0].shape[0])*p_count * dt / 3600.00
+    ustar=np.max(np.sqrt(np.sqrt(((tyxAvgtxzT**2+tyxAvgtyzT**2)))));
+    print('ustar :{0:.4f}'.format(ustar))
+    np.savez('avgStats.npz', yxAvgdudz = tyxAvgdudz, tyxAvguw = tyxAvguw, \
+        tyxAvgvw = tyxAvgvw, tyxAvgtxz = tyxAvgtxz, tyxAvgtyz = tyxAvgtyz , \
+        tyxAvg_uw_vw_total = tyxAvg_uw_vw_total , tyxAvgu = tyxAvgu, \
+        ustar = ustar, zforu = zforu , nzforu = nzforu);
+    #Plot of normalized dudz
+    fig = plt.figure();
+    ax = fig.add_subplot(111);
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft);
+    dudzN=tyxAvgdudz * zforu * kappa / ustar;
+    ys=len(nzforu[1:Nz/2]);
+    xx=np.ones((1, ys));
+    p1, = ax.plot(dudzN[1:Nz/2], nzforu[1:Nz/2],'-.r')
+    p2, = ax.plot(xx.T,nzforu[1:Nz/2],'--b')
+    plt.xlim(-5, 5);
+    lgnd = ax.legend([p1, p2], ['Simulation','Log law'], loc = 2);
+    lgnd.draw_frame(False)
+    ax.set_ylim(-0.1, 0.6)
+    ax.set_xlabel('$\phi_{m}$');
+    ax.set_ylabel('$Z/H$');
+    plt.savefig('phi_m.pdf')
+
+    #Plot of vertical profile of beta
+    fig = plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    p1, = ax.plot(tyxAvgbeta, range(Nz),'-.r')
+    ax.set_xlabel(r'$\beta$');
+    ax.set_ylabel('$Nz$');
+    plt.savefig('beta.pdf')
+    #Plot of vertical profile of Cs2
+    fig = plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    p1, = ax.plot(tyxAvgCs2, range(Nz),'-.r')
+    ax.set_xlabel('$Cs^{2}$');
+    ax.set_ylabel('$Nz$');
+    plt.savefig('Cs_2.pdf')
+
+    #Plot of vertical profile of au
+    fig = plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    p1, = ax.plot(tyxAvgu, z_norm_h,'-r')
+    p2, = ax.plot([0.0, np.max(tyxAvgu)], [1,1], '--k');
+    ax.set_xlabel(r'$\left < u \right >$');
+    ax.set_ylabel('$Normalized \ Height \ z/h$');
+    plt.savefig('avg_u.pdf')
+    #Plot of vertical profile of av
+    fig = plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    p1, = ax.plot(tyxAvgv, z_norm_h,'-r')
+    ax.set_xlabel(r'$\left < v \right >$');
+    ax.set_ylabel('$Normalized \ Height \ z/h$');
+    plt.savefig('avg_v.pdf')
+    #Plot of vertical profile of aw
+    fig = plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    p1, = ax.plot(tyxAvgw, z_norm_h,'-r')
+    ax.set_xlabel(r'$\left < w \right >$');
+    ax.set_ylabel('$Normalized \ Height \ z/h$');
+    plt.savefig('avg_w.pdf')
+
+    # plot vertical stress profile of total uw
+    fig=plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    print("tyzAvguw: {0}".format(tyxAvguw))
+    p1, = ax.plot( tyxAvgtxzT/ustar**2, z_norm_h, '-r');
+    p2, = ax.plot([0.0, -1], [1,1], '--k');
+    plt.ylim(-0.05, 2)
+    ax.set_xlabel(r"$(\overline{\left < \tilde{u}'\tilde{w}'\right >}+\overline{\left < \tau_{13} \right >})/u_*^2$");
+    ax.set_ylabel('$Normalized \ Height \ z/h$');
+
+    #lgnd = ax.legend([p1,p2,p3], ['SGS','Resolved','Total'], loc = 2);
+    #lgnd.draw_frame(False)
+    plt.savefig('uw_txz_vertical.pdf')
+
+
+    # plot vertical stress profile of total uu
+    fig=plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    p1, = ax.plot( tyxAvguu/ustar**2, z_norm_h, '-r');
+    p2, = ax.plot([0.0, np.max(tyxAvguu/ustar**2)], [1,1], '--k');
+    plt.ylim(-0.05, 2)
+    ax.set_xlabel(r"$\overline{\left < \tilde{u}'\tilde{u}'\right >}/u_*^2$");
+    ax.set_ylabel('$Normalized \ Height \ z/h$');
+    plt.savefig('uu_vertical.pdf')
+
+
+    # plot vertical stress profile of total vv
+    fig=plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    p1, = ax.plot( tyxAvgvv/ustar**2, z_norm_h, '-r');
+    p2, = ax.plot([0.0, np.max(tyxAvgvv/ustar**2)], [1,1], '--k');
+    plt.ylim(-0.05, 2)
+    ax.set_xlabel(r"$\overline{\left < \tilde{v}'\tilde{v}'\right >}/u_*^2$");
+    ax.set_ylabel('$Normalized \ Height \ z/h$');
+    plt.savefig('vv_vertical.pdf')
+
+
+    # plot vertical stress profile of total ww
+    fig=plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    p1, = ax.plot( tyxAvgww/ustar**2, z_norm_h, '-r');
+    p2, = ax.plot([0.0, np.max(tyxAvgww/ustar**2)], [1,1], '--k');
+    plt.ylim(-0.05, 2)
+    ax.set_xlabel(r"$\overline{\left < \tilde{w}'\tilde{w}'\right >}/u_*^2$");
+    ax.set_ylabel('$Normalized \ Height \ z/h$');
+    plt.savefig('ww_vertical.pdf')
+
+#    plot time evolution  ustar/uw / Cs2
+    ustar_evol= np.sqrt(np.sqrt(((yxAvgtxz[:, 0]**2+yxAvgtyz[:, 0]**2))));
+    fig = plt.figure();
+    ax = fig.add_subplot(111)
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    ax.plot(timestamps, ustar_evol)
+    ax.set_xlabel('time(hours)')
+    ax.set_ylabel("$u_*$")
+    plt.figtext(0.75, 0.5, str("z ="+str(zforu[0])+"(m)")[0:8]) 
+    plt.savefig('u_star_evol.pdf')
+    fig = plt.figure();
+    ax = fig.add_subplot(111) 
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft ) 
+    ax.plot(timestamps, yxAvguw[:, 1]/ustar**2)
+    plt.figtext(0.75, 0.5, str("z ="+str(zforu[1])+"(m)")[0:8]) 
+#    plt.ylim(-1.5, 1.5)
+    ax.set_xlabel('time(hours)');
+    ax.set_ylabel("${u^\prime w^\prime}/{u_*}^2$");
+    plt.savefig('uw_normalized_evol.pdf')
+    fig = plt.figure();
+    ax = fig.add_subplot(111)  
+    plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+    ax.plot(timestamps, yxAvgCs2[:, 0]) 
+    ax.set_xlabel('time(hours)');
+    ax.set_ylabel("${Cs}^2$");
+    plt.savefig('cs2_evol.pdf')
+#    print "au[:, 0] : ", yxAvgu[:, 0]
+#    print "auw[:, 1] : ", yxAvguw[:, 1]
+
+
+# read break file to get tend
+lines = np.loadtxt("../checkpoints/break", comments="#", delimiter="\n", unpack=False)
+# get only the last line
+tend = int(lines[-1]); 
+# read parameters from LESinputs.txt
+inparam = ld.readInput('../input/LESinputs.txt', ld.vars)
+Nx = inparam['Nx']; Ny = inparam['Ny']; Nz = inparam['Nz']; 
+l_z = inparam['l_z']; z_i = inparam['z_i']; p_count = inparam['p_count'];
+dt = inparam['dt']; fgr = inparam['fgr'];
+#define tstart 
+tstart = int(tend - float(tend) * 1.0/10.0); 
+print  "t_start :", tstart, "  t_end :", tend, "  dt : ", dt;
+print  "Physical Time Lapse : ", (tend-tstart) * dt/3600.00, " hours";
+#define line-types fro plotting
+ltype_cycle= cycle(['--r', '-g', '-.b', '--c', '-m', '--y', '-.k'])
+
+### ******************* PLOT SPECTRA *************************** ###
+
+# Coordinates 
+#zH_1 = np.arange(0, Nz, 1)/np.float64(Nz); zH_1[0] = 0.5/(Nz-1);  # For dudz,dvdz,dtdz
+#zH_2 = np.arange(0, Nz, 1)/np.float64(Nz);  # For w,uw,vw,wt
+#zH_3 = np.arange(0.5, Nz, 1)/np.float64(Nz);  # For u,v,T,Pr,Cs
+#z_1  = zH_1*l_z;  # For dudz,dvdz,dtdz
+#z_2  = zH_2*l_z;  # For w,uw,vw,wt
+#z_3  = zH_3*l_z;  # For u,v,T,Pr,Cs
+
+
+##read file spectru.bin
+#uspec_avg_span = ld.loadBin('../output/spectru.bin', Nz); 
+#print "uspec_avg_span.shape[0]", uspec_avg_span.shape[0]
+#r = np.int(Nx/2); c = np.int(uspec_avg_span.shape[0]/r); 
+#print 'c :', c;
+#uspec_avg_span = np.reshape(uspec_avg_span, (r, c), order = 'F')
+
+#fx = np.fft.fftfreq(Nx) * Nx; 
+#fx_z = np.zeros((len(fx), Nz))
+#fx_bl = np.zeros((len(fx), Nz))
+#BL = 1500.00
+#for i in np.arange(Nz):
+#    fx_z[:, i] = ( fx/(2.0 * np.pi * z_i)) * z_3[i]
+#for i in np.arange(Nz):
+#    fx_bl[:, i] = ( fx/(2.0 * np.pi * z_i)) * BL
+#print 'fx.shape', fx.shape
+# U SPECTRA NORMALIZED BY HEIGHT
+#fig = plt.figure()
+#ax = fig.add_subplot(111)
+#plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+#stride = 4
+# data for -5/3 line
+#cc = np.log10(0.15/1.22**(-5/3))
+#xx = np.array([1, 5]); yy = xx ** (-5.0/3.10) * 10 **(cc)
+#for h in np.arange(4, np.int(Nz * 3/4), stride):
+#    uspec = uspec_avg_span[:, h:c:Nz]
+#    uspec_t_avg = np.mean(uspec[1:Nx/(2*fgr), int(tstart/p_count):int(tend/p_count)], 1) 
+##    uspec_t_last = uspec[1:Nx/(2*fgr), -1] / (ustar_evol[-1]**2 * z_3[h]) 
+##    p, = ax.loglog(fx_z[1:Nx/(2*fgr), h], uspec_t_last[:], ltype_cycle.next())
+#    p, = ax.loglog(fx_z[1:Nx/(2*fgr), h], uspec_t_avg[:] / (tyxAvguu[h]**2), ltype_cycle.next())
+#    p1, = ax.loglog( xx, yy, ltype_cycle.next())
+#ax.set_xlabel("$kz$")
+#ax.set_ylabel(r"$E_u(k)\sigma_{u}{^2}$")
+#plt.savefig('u_spectra_norm_z.pdf') 
+## Premultiplied U SPECTRA NORMALIZED BY BOUNDARY LAYER HEIGHT
+#fig = plt.figure()
+#ax = fig.add_subplot(111)
+#cc = np.log10(0.15/1.22**(-5/3))
+#xx = np.array([1, 5]); yy = xx ** (-2.0/3.10) * 10 **(cc)
+#plt.gcf().subplots_adjust(bottom = addBottom, left = addLeft )
+#for h in np.arange(4, Nz * 3/4, stride):
+#    uspec = uspec_avg_span[:, h:c:Nz]
+#    uspec_t_avg = np.mean(uspec[1:Nx/(2*fgr), int(tstart/p_count):int(tend/p_count)], 1) 
+#    uspec_t_avg = (fx[1:Nx/(2*fgr)])*uspec_t_avg [:] / (tyxAvguu[h]**2) # normalized by u'u' and premultiplied by k
+##    uspec_t_last = uspec[1:Nx/(2*fgr), -1] / (ustar_evol[-1]**2 * BL) 
+#    p, = ax.loglog(fx_bl[1:Nx/(2*fgr), h], uspec_t_avg[:], ltype_cycle.next())
+#    p1, = ax.loglog( xx, yy, ltype_cycle.next())
+#ax.set_xlabel("$k\Delta$")
+#ax.set_ylabel(r"$E_u(k)u_*^2\Delta^{-1}$")
+#plt.savefig('u_spectra_norm_BL.pdf')
+
+#plt.show()

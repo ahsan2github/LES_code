@@ -1,0 +1,55 @@
+FC=mpif90  
+#COMP=mpif90 -O0 -g -finit-local-zero -fbacktrace -fbounds-check
+FFTLIB=-L/usr/lib -lfftw3 
+INCLUDE=
+
+objdir = obj
+bindir = bin
+SOURCES =  *.f90
+vpath %.o ../$(objdir)
+#~ SOURCES =  optim_scl_pln.f90 \
+ #~ convec.f90 derivwall2.f90 divstress_uv.f90 \
+#~ divstress_w.f90  openfiles.90 sgs_stag.f90 output_average.90 readInputs.f90 \
+#~ les_conv_scalar.f90 mpi_transpose.f90  rmsdiv.f90 scalar_rhs.f90 \
+#~ calcbeta.f90 avgslice.f90 scalar_slice.f90 spectrum.f90 stepbl_uv.f90 stepbl_w.f90 step_s.f90 \
+#~ surf_flux.f90 s_zeroslice.f90 zeroslice.f90 wallstress2.f90 press_stag.f90 \
+#~ optim_lag.f90 optim_lag_dyn.f90 optim_pln.f90 optim_loc.f90 optim_wong.f90 \
+#~ optim_scl_lag.f90 optim_scl_lag_dyn.f90  optim_scl_loc.f90 optim_scl_wong.f90 \
+#~ root.f90 root8.f90 newroots.f90 sponge_layer.f90 scalar_advection.f90 \
+#~ lagrng_sd.f90 lagrng_sd_s.f90 lagrng_dyn.f90 lagrng_dyn_s.f90 interp3D.f90 \
+#~ update1.f90 update3.f90 update9.f90 updateHorz.f90 \
+#~ filt_da.f90 filter_la.f90 filter_2laa.f90 filter_2dsl.f90 dealias1.f90 dealias2.f90 \
+#~ ddx.o ddy.f90 ddz_w.f90 ddz_uv.f90 ddz_uv_p.f90 \
+#~ plane_avg.f90 plane_reduce.f90 spanwise_avg.f90 tridag.o cyclic.f90\
+#~ dispersion.f90 point_release.f90 interp3D_particle.f90 interpLOG.f90 \
+#~ canopy_drag.f90 pressure_forcing.f90 \
+#~ galileanGroundShift.f90 solveGroundBC.f90 netSurfaceRadiation.f90 \
+#~ randn.f90 ddx_upwind.f90 ddy_upwind.f90 calc_lambda2.f90 write_frames.f90 
+
+MODULESOURCE = LESmodules.f90
+
+OBJECTS = $(patsubst %.f90,../$(objdir)/%.o,$(SOURCES))
+MODULES = globals.mod wallBoundaryConditions.mod scalars.mod sgs.mod mainModule.mod particleModule.mod canopyModule.mod \
+		press_force.mod SEBmodule.mod frameModule.mod
+		
+EXECUTABLE =../ bin/LES2
+
+all : $(MODULES)  $(EXECUTABLE)
+
+$(MODULES) : $(MODULESOURCE)
+	$(FC)   -c $^ 
+	
+$(OBJECTS) : $(SOURCES)
+	$(FC)  -c  ../obj/$^
+
+
+$(EXECUTABLE): $(OBJECTS)
+	$(FC) $(FLAGS)  -o  ../$(objdir)/$^  $(INCLUDE) $(FFTLIB)  
+	
+debug:	$(OBJ)
+	$(COMP_DEBUG) $(OBJ) -o ../bin/LES2 $(FFTLIB)
+
+.PHONY : clean
+
+clean :
+	rm -fr $(EXECUTABLE)  $(OBJECTS) $(MODULES) *.*~ makefile~ *.o

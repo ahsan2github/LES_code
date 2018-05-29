@@ -1,0 +1,16 @@
+#!/bin/csh
+#SBATCH --time=72:00:00
+#SBATCH --nodes=6
+#SBATCH -o slurm-%j.out-%N
+#SBATCH --ntasks=96
+#SBATCH --account=stoll
+#SBATCH --partition=kingspeak
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=ahsan.mecha@gmail.com
+ 
+setenv WORKDIR /scratch/general/lustre/u0699351/brians_case
+setenv SCRDIR /scratch/general/lustre/u0699351/brians_case
+cd  /scratch/general/lustre/u0699351/brians_case
+#module load openmpi/3.0.0.i
+#module load fftw
+mpirun -np 96 bin/LES2

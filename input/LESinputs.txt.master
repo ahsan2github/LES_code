@@ -1,0 +1,140 @@
+! dimen.txt lists the parameters for LARGE EDDY SIMULATION in fortran
+! les_conv_scalar.f reads these parameters to initialize the simulation
+! read dimen.info for more information on parameters and LES functionality
+!
+!
+! constants
+0.4d0			= Von Karmon constant
+0.4d0	      	  	= Sc
+0.1d0			= Co
+2.0d0			= nnn
+3.14159265358979d0	= pi
+!
+!
+! model parameters and flags
+3			= model, 1=Smagorinsky, 2=Dynamic, 3=Scale dependent
+1			= averaging, 0=plane ave., 1=Lagrangian ave., 2=Local ave., 3=Wong-Lilly scale-dependent dynamic model
+1.d0			= fgr, filter-to-grid ratio
+2.d0			= tfr, test filter to grid ratio
+1			= mom_nodes, vertical level for computation of dynamic momentum optimization (0=w-nodes, 1=uvp-nodes)
+1			= scl_nodes, level for computation of dynamic scalar optimization (0=w-nodes, 1=uvp-nodes)
+3			= FFT_FLAG (1=FFTW_ESTIMATE 2=FFTW_PATIENT 3=FFTW_MEASURE 4=FFTW_EXHAUSTIVE)
+!
+!
+! space and time parameters
+100 			= nsteps, number of timesteps
+3			= hprocs, number of processors, horizontal direction
+0.05d0 		= dt, physical timestep (sec)
+36 			= Nx, x-direction # of grid points, streamwise direction
+36 			= Ny, y-direction # of grid points, spanwise direction
+36 			= Nz, z-direction # of grid points, wall-normal direction
+1			= aNx, dimension of statistics to output, 1=plane-ave. (stats are f(z)), Nx=spanwise-ave (stats are f(x,z))
+1 			= l_r, ratio of streamwise to spanwise (an integer), l_r = Lx/Ly
+1000.d0 			= z_i, normalization height, dimensionless depth of domain=L_z/z_i (recall: Lx/z_i=2*pi, Ly/z_i=2*pi/l_r)
+0.45d0 			= u_star, normalization velocity, dimensionless velocity=u/u_star
+1000.d0 			= l_z, dimensioned depth of domain
+0 			= verticalBC, type of vertical boundary condition used, 0=rigid lid/wall, 1=periodic
+0.d0			= Ugal, Gallilean transformation x-comp (=0 for press_cor=0) (divide by u_star in LES code)
+0.d0			= Vgal, Gallilean transformation y-comp (=0 for press_cor=0) (divide by u_star in LES code)
+0.0d0			= Ug, geostrophic wind x-component (divide by u_star in LES code)
+0.0d0			= Vg, geostrophic wind y-component (divide by u_star in LES code)
+0 			= press_cor, 0=constant pressure forcing 1=const geo wind 2=variable geo wind 3=const Uavg forcing
+0.0002025d0 			= f_p, pressure gradient (dynamic) if press_cor=0 (m/s^2)
+1			= press_step, frequency of pressure forcing calculations if press_cor=3
+5.d0			= u_avg, desired vertical average of u-profile (m/s) if press_cor=3
+0.d0 			= theta_mean_wind, meand wind direction (degrees), takes values between +/- 90 degrees
+0.d0			= f_c, coriolis parameter, f_c=1.45*sin(latitude)
+0.d0 			= nu, kinematic viscosity (m^2/s^2) (=0 for inviscid flow)
+0			= M_advec
+!
+!
+! Scalar parameters
+0 			= scalarcount, number of scalars to compute (ie  0...N)
+1			= scalarFlags, type of scalar, 1=temperature, 2=moisture, 0=passive (one flag for each scalar to be computed)
+3			= surfaceFlags, boundary condition of scalar, 0=constant flux, 1=cooling rate, (not used if energy budget computation is used for BC)
+4800.0d0		= surfaceFluxes, surface flux of scalars when surfaceFlag==0 [K-m/s]
+1.0d0			= scalarScales, scale of scalar - used for non-dimensional computation
+0.d0			= dsdtHomogeneous, change in scalar concentration at surface when surfaceFlags==1
+1       		= S_advec, 
+0.00290d0		= inversion, inversion strength at domain top (lapse rate) [K/m]
+292.0d0			= theta_0, buoyancy flux reference temperature
+1			= sponge, 1=dampening layer starting at z_d, 0=none
+600.d0			= z_d, height to start dampening layer if sponge==1
+60			= rlx_time, relaxation time for dampening layer in seconds
+0			= Ri_flag, Richardson # criteria, if pointwise gradient Ri # exceeds pointwise SGS prandtl #, then SGS terms switched OFF, 1=criteria on, 0=off
+!
+!
+! computation and printing frequencies for statistics and coefficients (every N timesteps)
+5			= c_count, frequency of computation of statistics
+25			= p_count, frequency of printing statistics 
+2 			= cs_count, frequency of computing sub-grid scale coefficients
+!*** 3D Field (frames) printing, prints 3d field of u,v,w, and each scalar
+10 			= nframe, number of instantaneous frames to output (0 will output nothing, skip frame outputting)
+1			= sframe, timestep at which to start saving frames
+10			= framestep, number of timesteps between frames
+60			= frameh, height of frames
+0			= framefiles, number of frame variables to output (=0 outputs nothing)
+!
+!
+! resubmission info
+0 			= inituA, momentum flag for resubmission (0=newjob, 1=resubmitted)
+0 			= initsA, scalar flag for resubmission (0=newjob, 1=resubmitted)
+5000			= ruler, frequency of updating vel.out, t.out and surfaceScalarX.out, which are used to restart job
+!
+!
+! particle dispersion parameters
+0 			= npart, total number of particles to be released
+2			= part_model, 1=no model, 2=Weil SFS model
+10000			= start_release, timestep to begin releases
+800			= partstep, # of timesteps between releases
+3			= skip_step, # of timesteps between trajectory calcs
+1			= freq, # of particles per release (per release position)
+3200			= nr, number of release points
+3			= Cop, particle model constant
+1e-6			= es_min, minimum SGS TKE threshold (m^2/s^2)
+1e-8			= det_min, minimum determinant of SGS stress tensor
+0			= deposition, (0=no deposition model, 1=deposition model)
+0			= nodep_copy, (1=release duplicate particles with no deposition)
+0.d0	  		= wd, particle drift velocity (m/s)
+0.01d0			= Lv, characteristic vegetation element size (m)
+!
+!
+! canopy parameters
+0 			= c_flag, (= 1 if canopy is present)
+0.5d0			= Cd, canopy drag coefficient
+2.d0			= h_canopy, height of canopy (m)
+!
+!
+! soil type parameters
+0	    		= soilLevels (= 0 for no soil BC)
+0.0015d0		= zt
+1024.0d0		= pressureScale,  [mbar]
+1.204d0			= densityAir, [kg/m^3]
+1005.0d0		= Cp_air, [J/kg-K]
+1000.0d0		= densityWater [kg/m^3]
+2.45e6			= latentHeatWater [J/kg]
+4186000.0d0		= heatCapWater [J/kg-K]
+461.0d0			= waterGasConst [J/kg-K]
+0.001d0			= moistureCriteria
+0.00001d0		= temperatureCriteria
+1e-6			= tempFluxCriteria
+50			= maxFluxIterations
+50			= maxTempIterations
+0.5			= convFactor
+1000			= endConstSEB
+150			= updateFreqSEB
+75			= integrateSoilDiffFreq
+1			= albedoFlag
+!
+!
+! radiation parameters
+0			= radiationFlag
+750			= stepsPerRadVal
+5.67040e-8		= SB_constant [W/m^2-k^4]
+1.127d0			= solarIrradiance
+51.9711d0		= latitude
+4.9267d0		= longitude
+183			= day
+0.99d0			= emissivity
+0			= filtLevelsLambda  
+

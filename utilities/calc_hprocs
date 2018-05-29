@@ -1,0 +1,184 @@
+#!/bin/bash
+#Argument = -nprocs NPROCS -inputpath INPUT_PATH
+#/* *-* mode: sh-mode *-* */ #bash syntax highlighting in emacs
+
+usage(){
+cat << EOF
+usage: $0 [options]
+
+calc_hprocs calculates the smallest possible hprocs for the parameters given in LESinputs.txt.
+
+OPTIONS:
+   -n VALUE    desired number of processors
+   -i DIR      path to input directory containing LESinputs.txt (default is inputpath='../input/'
+EOF
+}
+
+INPUT_PATH='../input/'
+
+#PARSE INPUTS
+while getopts "n:i:h" OPTION
+do
+    case $OPTION in
+	h)
+	    usage
+	    exit 1
+	    ;;
+	n)
+	    NPROCS=$OPTARG
+	    ;;
+	i)
+	    INPUT_PATH=$OPTARG
+	    ;;
+	?)
+	    usage
+	    exit 1
+	    ;;
+    esac
+done
+
+#CHECK THAT NPROCS OPTION WAS GIVEN
+if [ -z "$NPROCS" ];then
+    echo -e "\nERROR: nprocs argument not given.\n"
+    usage
+    exit 1
+fi
+
+#CHECK THAT INPUT_PATH HAS A TRAILING SLASH
+if [[ "$INPUT_PATH" != */ ]];then
+    INPUT_PATH=$INPUT_PATH'/'
+fi
+
+#PATH TO LESinputs.txt
+LESINPUTS_PATH=$INPUT_PATH'LESinputs.txt'
+
+#CHECK THAT LESinputs.txt EXISTS
+if [ ! -f "$LESINPUTS_PATH" ];then
+    echo "$LESINPUTS_PATH does not exist."
+    exit 1
+fi
+
+
+if [ $(( $NPROCS % 2 )) != 0 ]; then
+    echo "nprocs value ($nprocs) not evenly divisible by 2"
+    exit 1
+fi
+NP2=$(( $NPROCS / 2 ))
+
+NX=`cat $LESINPUTS_PATH | grep '= Nx,' | cut -f1 -d'=' | tr -d '\t'`
+NY=`cat $LESINPUTS_PATH | grep '= Ny,' | cut -f1 -d'=' | tr -d '\t'`
+NZ=`cat $LESINPUTS_PATH | grep '= Nz,' | cut -f1 -d'=' | tr -d '\t'`
+if [ "$NX" = '' ];then
+    echo "No Nx value in LESinputs.txt"
+    exit 1
+fi
+if [ "$NY" = '' ];then
+    echo "No Ny value in LESinputs.txt"
+    exit 1
+fi
+if [ "$NZ" = '' ];then
+    echo "No Nz value in LESinputs.txt"
+    exit 1
+fi
+echo -n "Calculating hprocs for Nx x Ny x Nz = $NX x $NY x $NZ and nprocs = $NPROCS..."
+
+for (( HPROCS=1 ; HPROCS <= $NP2 ; HPROCS++ )); do
+
+    FLAG=0
+
+    if [ $(( $NPROCS % $HPROCS )) != 0 ]; then
+     	FLAG=1;
+    fi;
+
+    VPROCS=$(( $NPROCS / $HPROCS ))
+
+    if [ $(( $NX % 2 )) != 0 ]; then
+     	FLAG=1;
+    fi;
+    if [ $(( $(( NX / 2)) % $HPROCS )) != 0 ]; then
+    	FLAG=1;
+    fi;
+    if [ $(( $NY % $HPROCS )) != 0 ]; then
+     	FLAG=1;
+    fi;
+    if [ $(( $NZ % $VPROCS )) != 0 ]; then
+     	FLAG=1;
+    fi;
+    if [ $(( $(( $NX / $HPROCS )) % 2 )) != 0 ]; then
+     	FLAG=1;
+    fi;
+    if [ $(( $(( $NX*3/4 )) % $HPROCS )) != 0 ]; then
+     	FLAG=1;
+    fi;
+    if [ $(( $(( $NY / $HPROCS)) % 2 )) != 0 ]; then
+    	FLAG=1;
+    fi;
+    if [ $(( $NY % $VPROCS )) != 0 ]; then
+     	FLAG=1;
+    fi;
+    if [ $(( $NX / $VPROCS )) -lt 2 ];then
+     	FLAG=1;
+    fi
+
+    if [ "$FLAG" = "0" ]; then
+
+	echo "success."
+	echo -n "hprocs = $HPROCS works for this grid. (A)CCEPT, (n)ext value, (q)uit: "
+	read ACTION
+	ACTION_FLAG=0
+	while [ "$ACTION_FLAG" = '0' ]; do
+
+	    if [[ "$ACTION" = 'a' ]] || [[ "$ACTION" = 'A' ]] || [[ "$ACTION" = '' ]];then
+		ACTION_FLAG=1
+		FLAG=2
+	    elif [ "$ACTION" = 'n' ];then
+		ACTION_FLAG=1
+		FLAG=0
+		echo -n "Searching for next largest hprocs value..."
+	    elif [ "$ACTION" = 'q' ];then
+		exit 0
+	    else
+		echo -n "Please specify (A)CCEPT, (n)ext value, (q)uit: "
+		read ACTION
+	    fi
+
+	done
+
+    fi
+
+    if [ "$FLAG" = "2" ]; then
+
+	echo -n "Write hprocs = $HPROCS to LESinputs.txt? (Y)ES/(n)o: "
+	read ACTION
+	ACTION_FLAG=0
+	while [ "$ACTION_FLAG" = '0' ]; do
+
+	    if [[ "$ACTION" = 'Y' ]] || [[ "$ACTION" = 'y' ]] || [[ "$ACTION" = '' ]];then
+
+		sed 's;.*= hprocs,.*;'$HPROCS'\t\t\t= hprocs, number of processors, horizontal direction;' $LESINPUTS_PATH > tempfile; mv tempfile $LESINPUTS_PATH
+		
+
+		exit 0
+	    elif [ "$ACTION" = 'n' ];then
+		echo "Exiting..."
+		exit 0
+	    else
+		echo -n "Please specify (y)es or (n)o: "
+		read ACTION
+	    fi
+
+	done
+
+	exit 0
+    fi
+
+done
+
+if [ "$HPROCS" = "$(($NP2+1))" ];then
+    echo "failed."
+    echo "Could not find a valid hprocs for this grid."
+    exit 1
+fi
+
+
+exit 0

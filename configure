@@ -1,0 +1,139 @@
+#!/bin/bash
+#/* *-* mode: sh-mode *-* /*
+
+OBJECTS='LESmodules.o les_conv_scalar.o readInputs.o mpi_transpose.o  \
+sgs_stag.o avgslice.o calcbeta.o convec.o derivwall2.o divstress_uv.o \
+divstress_w.o openfiles.o output_average.o rmsdiv.o scalar_rhs.o \
+scalar_slice.o spectrum.o stepbl_uv.o stepbl_w.o step_s.o \
+surf_flux.o s_zeroslice.o zeroslice.o wallstress2.o press_stag.o \
+optim_lag.o optim_lag_dyn.o optim_pln.o optim_loc.o optim_wong.o \
+optim_scl_lag.o optim_scl_lag_dyn.o optim_scl_pln.o optim_scl_loc.o optim_scl_wong.o \
+root.o root8.o newroots.o sponge_layer.o scalar_advection.o \
+lagrng_sd.o lagrng_sd_s.o lagrng_dyn.o lagrng_dyn_s.o interp3D.o \
+update1.o update3.o update9.o updateHorz.o \
+filt_da.o filter_la.o filter_2laa.o filter_2dsl.o dealias1.o dealias2.o \
+ddx.o ddy.o ddz_w.o ddz_uv.o ddz_uv_p.o  \
+plane_avg.o plane_reduce.o spanwise_avg.o tridag.o cyclic.o\
+dispersion.o point_release.o interp3D_particle.o interpLOG.o \
+canopy_drag.o pressure_forcing.o read3d.o write3d.o\
+galileanGroundShift.o solveGroundBC.o netSurfaceRadiation.o \
+randn.o ddx_upwind.o ddy_upwind.o calc_lambda2.o write_frames.o \
+filter_2laa_customFilt.o writeBovHeader.o'
+
+OPT_LEVEL='O3'
+INTEL_DEBUG_OPTS='-g -fpe0 -traceback -check'
+GNU_DEBUG_OPTS='-g -finit-local-zero -fbacktrace -fbounds-check'
+
+echo -n "checking which system we're on..."
+if [ ! -z "$MACHINEID" ];then
+    SYSTEMID=`echo $MACHINEID`
+    if [[ "$SYSTEMID" != "chpc" ]] && [[ "$SYSTEMID" != "ncar" ]] && [[ "$SYSTEMID" != "bertha" ]]; then
+	echo $SYSTEMID
+	echo -e "\e[00;31mInvalid MACHINEID: $MACHINEID. Valid values are [chpc/ncar/bertha].\e[00m"
+	exit 1
+    fi
+else 
+    echo "failed."
+    echo "MACHINEID environmental variable not set."
+    echo -n "Enter machine ID [chpc, ncar, bertha, (q)uit]):"
+    read MACHINEID
+    if [[ "$MACHINEID" = "q" ]] || [[ "$MACHINEID" = "quit" ]];then
+	exit 1
+    fi 
+    if [[ "$MACHINEID" != "chpc" ]] && [[ "$MACHINEID" != "ncar" ]] && [[ "$MACHINEID" != "bertha" ]]; then
+	echo "Invalid choice...exiting."
+    fi
+    SYSTEMID=$MACHINEID
+fi
+echo $SYSTEMID
+
+echo -n "compiling test program..."
+
+echo -e '\tprogram hello_world' > hello_world.f
+echo -e "\tcall MPI_INIT( ierr )" >> hello_world.f
+echo -e "\tcall MPI_COMM_RANK( MPI_COMM_WORLD, me, ierr )" >> hello_world.f
+echo -e "\twrite(*,*)'hello_world from me=',me" >> hello_world.f
+echo -e "\tcall MPI_FINALIZE(ierr)" >> hello_world.f
+echo -e "\tEND" >> hello_world.f
+
+mpif90 hello_world.f &> /dev/null
+
+if [ ! -e 'a.out' ];then
+    echo "failed."
+    echo "test program did not compile...exiting."
+    exit 1
+fi
+
+echo "done."
+
+echo -n "checking which compiler was used to build mpirun..."
+
+if [ ! -z "$(grep -i intel a.out)" ];then #intel compiler
+    echo "intel."
+    COMPILER='intel'
+elif [ ! -z "$(grep -i gnu a.out)" ];then #gnu compiler
+    echo "GNU."
+    COMPILER='gnu'
+else
+    echo "unkown."
+    echo "WARNING: using default compiler options."
+    COMPILER='unknown'
+fi
+
+echo -n "checking FFTW libraries..."
+if [ "$MACHINEID" = 'ncar' ];then
+    if [ -z "$(echo $LIB_NCAR) | grep -lfftw3)" ];then
+	module load fftw
+    fi
+    if [ -z "$(echo $LIB_NCAR) | grep -lfftw3)" ];then
+	echo "ERROR: FFTW library could not be loaded."
+	exit 1
+    fi
+elif [ "$MACHINEID" = 'chpc' ];then
+    if [ "$COMPILER" = 'intel' ];then
+	FFTLIB='-L/uufs/chpc.utah.edu/sys/pkg/fftw/3.2.2i/lib -lfftw3'
+    elif [ "$COMPILER" = 'gnu' ];then
+	FFTLIB='-L/uufs/chpc.utah.edu/sys/pkg/fftw/3.2.2/lib -lfftw3'
+    fi
+elif [ "$MACHINEID" = 'bertha' ];then
+    if [ "$COMPILER" = 'intel' ];then
+	FFTLIB='-L/mpi/std-intel/fftw/lib -lfftw3'
+    elif [ "$COMPILER" = 'gnu' ];then
+	FFTLIB='-L/mpi/std-gnu/fftw/lib -lfftw3'
+    fi
+fi	    
+echo "done."
+
+echo -n "building makefile..."
+
+cd src
+echo "COMP=mpif90 -$OPT_LEVEL" > makefile
+echo -n "COMP_DEBUG=mpif90 -$OPT_LEVEL " >> makefile
+if [ "$COMPILER" = 'intel' ];then
+    echo $INTEL_DEBUG_OPTS >> makefile
+elif [ "$COMPILER" = 'gnu' ];then
+    echo $GNU_DEBUG_OPTS >> makefile
+fi
+echo -e "FFTLIB=$FFTLIB \n" >> makefile
+echo -e "OBJ= $OBJECTS \n" >> makefile
+echo -e "LES2:\t"'$(OBJ)' >> makefile
+echo -e "\t"'$(COMP) $(OBJ) -o ../bin/LES2 $(FFTLIB)' >> makefile
+echo -e "\ndebug:\t"'$(OBJ)' >> makefile
+echo -e '\t$(COMP_DEBUG) $(OBJ) -o ../bin/LES2 $(FFTLIB)' >> makefile
+echo -e "\n%.o : %.f90" >> makefile
+echo -e "\t"'$(COMP) $(FFTLIB) -c $?' >> makefile
+echo -e "\nclean:" >> makefile
+echo -e "\t"'rm -f *.o *.mod ../bin/LES2' >> makefile
+
+cd ..
+echo "done."
+
+echo -n "cleaning up..."
+rm -f a.out hello_world.f &> /dev/null
+#make clean &> /dev/null
+echo "done."
+
+echo -e "\nmakefile has been successfully created."
+echo -e "use 'make' command to compile, or 'make debug' to compile for debugging.\n"
+
+exit 0

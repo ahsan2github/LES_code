@@ -1,0 +1,35 @@
+COMP=mpif90 
+#COMP_DEBUG=mpif90 -O3 -g -finit-local-zero -fbacktrace -fbounds-check
+#FFTLIB=-L/uufs/chpc.utah.edu/sys/pkg/fftw/3.2.2/lib -lfftw3 
+#FFTLIB = -L/usr/lib/x86_64-linux-gnu -lfftw3
+FFTLIB=-L/usr/lib64/ -lfftw3 
+
+OBJ= LESmodules.o les_conv_scalar.o readInputs.o mpi_transpose.o  \
+sgs_stag.o avgslice.o calcbeta.o convec.o derivwall2.o divstress_uv.o \
+divstress_w.o openfiles.o output_average.o rmsdiv.o scalar_rhs.o \
+scalar_slice.o spectrum.o stepbl_uv.o stepbl_w.o step_s.o \
+surf_flux.o s_zeroslice.o zeroslice.o wallstress2.o press_stag.o \
+optim_lag.o optim_lag_dyn.o optim_pln.o optim_loc.o optim_wong.o \
+optim_scl_lag.o optim_scl_lag_dyn.o optim_scl_pln.o optim_scl_loc.o optim_scl_wong.o \
+root.o root8.o newroots.o sponge_layer.o scalar_advection.o \
+lagrng_sd.o lagrng_sd_s.o lagrng_dyn.o lagrng_dyn_s.o interp3D.o \
+update1.o update3.o update9.o updateHorz.o \
+filt_da.o filter_la.o filter_2laa.o filter_2dsl.o dealias1.o dealias2.o \
+ddx.o ddy.o ddz_w.o ddz_uv.o ddz_uv_p.o  \
+plane_avg.o plane_reduce.o spanwise_avg.o tridag.o cyclic.o\
+dispersion.o point_release.o interp3D_particle.o interpLOG.o \
+canopy_drag.o pressure_forcing.o read3d.o write3d.o\
+galileanGroundShift.o solveGroundBC.o netSurfaceRadiation.o \
+randn.o ddx_upwind.o ddy_upwind.o calc_lambda2.o write_frames.o 
+
+LES2:	$(OBJ)
+	$(COMP) $(OBJ) -o ../bin/LES2 $(FFTLIB)
+
+debug:	$(OBJ)
+	$(COMP_DEBUG) $(OBJ) -o ../bin/LES2 $(FFTLIB)
+
+%.o : %.f90
+	$(COMP) $(FFTLIB) -c $?
+
+clean:
+	rm -f *.o *.mod ../bin/LES2

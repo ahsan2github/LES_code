@@ -1,0 +1,939 @@
+    Subroutine SGS_STAG(qx,qy,qz,u,v,w,dudx,dudy,dudz,dvdx,dvdy, &
+    dvdz,dwdx,dwdy,dwdz,dsdx,dsdy,dsdz,pt,Cs2,Cs2_m,Pr2,Pr2_m, &
+    cst,txx,txy,txz,tyy,tyz,tzz,scalar, &
+    a1_old,b1_old,c1_old,d1_old,e1_old, &
+    a2_old,b2_old,c2_old,d2_old,e2_old, &
+    a4_old,b4_old,c4_old,d4_old,e4_old, &
+    a8_old,b8_old,c8_old,d8_old,e8_old, &
+    beta1,beta2,ESGS3D,DSGS3D,ESCL3D,TL)
+
+    use globals
+    use mainModule
+    use scalars
+    use sgs
+    use wallBoundaryConditions
+    implicit none
+
+    interface
+    include './interfaces/optim_lag.f90'
+    include './interfaces/optim_scl_lag.f90'
+    include './interfaces/optim_lag_dyn.f90'
+    include './interfaces/optim_scl_lag_dyn.f90'
+    include './interfaces/optim_pln.f90'
+    include './interfaces/optim_scl_pln.f90'
+    include './interfaces/optim_loc.f90'
+    include './interfaces/optim_scl_loc.f90'
+    include './interfaces/optim_wong.f90'
+    include './interfaces/optim_scl_wong.f90'
+    include './interfaces/dealias1.f90'
+    include './interfaces/dealias2.f90'
+    include './interfaces/update1.f90'
+    include './interfaces/update3.f90'
+    include './interfaces/update9.f90'
+    end interface
+
+    integer*4 :: i,j,k,pt,cst,ccount,N,ll
+    real*8 :: Re_inv
+
+    real*8,dimension(:,:,:):: dudx,dudy,dudz,dvdx,dvdy,dvdz, &
+    dwdx,dwdy,dwdz,u,v,w,txx,txy,txz,tyy,tyz,tzz, &
+    a1_old,b1_old,c1_old,d1_old,e1_old, &
+    a2_old,b2_old,c2_old,d2_old,e2_old,Cs2,Cs2_m,beta1,ESGS3D, &
+    DSGS3D,TL
+
+    real*8,dimension(size(Cs2,1),size(Cs2,2),size(Cs2,3)):: ux,uy,uz, &
+    vx,vy,vz,wx,wy,wz,u_,v_,w_,S,S11,S12,S13,S22,S23,S33,S_hat, &
+    S_hatd,Rip
+        
+    real*8,dimension(size(Cs2,1)*3/2,size(Cs2,2)*3/2,size(Cs2,3)):: &
+    S11_m,S12_m,S13_m,S22_m,S23_m,S33_m,S_m,txx_m,txy_m,txz_m, &
+    tyy_m,tyz_m,tzz_m,S11_mu,S12_mu,S13_mu,S22_mu,S23_mu, &
+    S33_mu,S_mu
+
+    real*8,dimension(size(Cs2,1)*3/2,size(Cs2,2)*3/2):: Cs2_L, Pr2_L
+
+    real*8 :: l(size(Cs2,3)),ct,txzp(size(Cs2,1),size(Cs2,2)), &
+    tyzp(size(Cs2,1),size(Cs2,2)),zz(size(Cs2,3)), &
+    cs_ave,b1_ave,pr_ave,b2_ave
+
+!....Scalar Variables................................................
+    real*8,dimension(:,:,:,:)::qx,qy,qz,dsdx,dsdy,dsdz, &
+    scalar,ESCL3D,Pr2,Pr2_m,beta2, &
+    a4_old,b4_old,c4_old,d4_old,e4_old, &
+    a8_old,b8_old,c8_old,d8_old,e8_old
+
+    real*8,dimension(size(Cs2,1),size(Cs2,2),size(Cs2,3),scalarCount) &
+    ::tx,ty,tz,t_
+         	  
+    real*8,dimension(size(Cs2,1)*3/2,size(Cs2,2)*3/2,size(Cs2,3), &
+    scalarCount)::qx_m,qy_m,qz_m,tx_m,ty_m,tz_m
+
+!...Inverse Reynolds Number (=0 for inviscid flow)
+    Re_inv=nu/(u_star*z_i)
+
+!...Cs is Smagorinsky's constant. l is a filter size (non-dim.)
+
+    if (vfact == 0 .AND. verticalBC == 0) then
+        do j=1,nyb
+            do i=1,nx
+                txzp(i,j)=txz(i,j,2)
+                tyzp(i,j)=tyz(i,j,2)
+            end do
+        end do
+    end if
+!.....For traditional Smagorinsky
+
+    if(model == 1)then
+
+    ! if scalar is computed, determine Smagorinsky term for all nodes
+        if (scalarCount >= 1)then
+
+            do ll =1,scalarCount
+                do k=1,Nzb+2
+                    do j=1,nyb
+                        do i=1,nx
+                            Pr2(i,j,k,ll)=Co**2./Sc
+                        enddo
+                    enddo
+                                        
+                    do j=1,nyb2
+                        do i=1,nx2
+                            Pr2_m(i,j,k,ll)=Co**2./Sc
+                        end do
+                    end do
+                end do
+            enddo
+        endif
+         
+    ! compute Smagorinsky coef. for momentum
+        do k=1,Nzb+2
+            do j=1,nyb
+                do i=1,nx
+                    Cs2(i,j,k)=Co**2.0
+                end do
+            end do
+
+            do j=1,nyb2
+                do i=1,nx2
+                    Cs2_m(i,j,k)=Co**2.0
+                end do
+            end do
+
+            if(vfact == 0 .AND. verticalBC == 0) then
+                if(k==2) then
+                    zz(k)=(k-1.-0.5)*dz
+                else
+                    zz(k)=(k-1.-1.)*DZ
+                end if
+            else
+                zz(k)=(k-1.+vfact*nzb-1.)*DZ
+            end if
+            l(k)=(Co**(nnn)*(vonk*zz(k))**(-nnn)+ &
+            (delta)**(-nnn))**(-1./nnn)
+        end do
+
+    else
+
+        do k=1,Nzb+2
+            l(k)=fgr*(DX*DY*DZ)**(1./3.)
+        end do
+
+    end if
+
+    if(mom_nodes == 0)then
+    ! interpolations to w-nodes
+        do k=2,nzb+1
+            u_(:,:,k)=0.5d0*(u(:,:,k)+u(:,:,k-1))
+            v_(:,:,k)=0.5d0*(v(:,:,k)+v(:,:,k-1))
+            w_(:,:,k)=w(:,:,k)
+
+            ux(:,:,k)=0.5d0*(dudx(:,:,k)+dudx(:,:,k-1))
+            uy(:,:,k)=0.5d0*(dudy(:,:,k)+dudy(:,:,k-1))
+            uz(:,:,k)=     dudz(:,:,k)
+            vx(:,:,k)=0.5d0*(dvdx(:,:,k)+dvdx(:,:,k-1))
+            vy(:,:,k)=0.5d0*(dvdy(:,:,k)+dvdy(:,:,k-1))
+            vz(:,:,k)=     dvdz(:,:,k)
+            wx(:,:,k)=     dwdx(:,:,k)
+            wy(:,:,k)=     dwdy(:,:,k)
+            wz(:,:,k)=0.5d0*(dwdz(:,:,k)+dwdz(:,:,k-1))
+        end do
+
+    else
+    ! interpolations to u-v-p nodes
+        do k=2,nzb+1
+            u_(:,:,k)=u(:,:,k)
+            v_(:,:,k)=v(:,:,k)
+            w_(:,:,k)=0.5d0*(w(:,:,k)+w(:,:,k+1))
+                        
+            ux(:,:,k)=     dudx(:,:,k)
+            uy(:,:,k)=     dudy(:,:,k)
+            uz(:,:,k)=0.5d0*(dudz(:,:,k)+dudz(:,:,k+1))
+            vx(:,:,k)=     dvdx(:,:,k)
+            vy(:,:,k)=     dvdy(:,:,k)
+            vz(:,:,k)=0.5d0*(dvdz(:,:,k)+dvdz(:,:,k+1))
+            wx(:,:,k)=0.5d0*(dwdx(:,:,k)+dwdx(:,:,k+1))
+            wy(:,:,k)=0.5d0*(dwdy(:,:,k)+dwdy(:,:,k+1))
+            wz(:,:,k)=     dwdz(:,:,k)
+        end do
+
+    endif
+
+    if (vfact == 0 .AND. verticalBC == 0) then
+    ! bottom boundary condition
+        u_(:,:,2)=u(:,:,2)
+        v_(:,:,2)=v(:,:,2)
+        w_(:,:,2)=w(:,:,2+1)/2.d0
+
+        ux(:,:,2)=     dudx(:,:,2)
+        uy(:,:,2)=     dudy(:,:,2)
+        uz(:,:,2)=     dudz(:,:,2)
+        vx(:,:,2)=     dvdx(:,:,2)
+        vy(:,:,2)=     dvdy(:,:,2)
+        vz(:,:,2)=     dvdz(:,:,2)
+        wx(:,:,2)=0.5d0*(dwdx(:,:,3)+dwdx(:,:,2))
+        wy(:,:,2)=0.5d0*(dwdy(:,:,3)+dwdy(:,:,2))
+        wz(:,:,2)=     dwdz(:,:,2)
+    endif
+
+    if(t == 1)then
+        cst=cs_count
+    end if
+
+    do k=2,Nzb+1
+        S11(:,:,k)=0.5*(ux(:,:,k)+ux(:,:,k))
+        S33(:,:,k)=0.5*(wz(:,:,k)+wz(:,:,k))
+        S22(:,:,k)=0.5*(vy(:,:,k)+vy(:,:,k))
+        S12(:,:,k)=0.5*(uy(:,:,k)+vx(:,:,k))
+        S13(:,:,k)=0.5*(uz(:,:,k)+wx(:,:,k))
+        S23(:,:,k)=0.5*(vz(:,:,k)+wy(:,:,k))
+    end do
+
+    if(mom_nodes == 0)then
+
+        call dealias1(S11,S11_m)
+        call dealias1(S12,S12_m)
+        call dealias1(S13,S13_m)
+        call dealias1(S22,S22_m)
+        call dealias1(S23,S23_m)
+        call dealias1(S33,S33_m)
+
+        do k=2,nzb+1
+            S_m(:,:,k)=sqrt(2*(S11_m(:,:,k)**2+S22_m(:,:,k)**2+ &
+            S33_m(:,:,k)**2+2.*S12_m(:,:,k)**2+2.*S13_m(:,:,k)**2+ &
+                       2.*S23_m(:,:,k)**2))
+        enddo
+
+    else
+
+        call dealias1(S11,S11_mu)
+        call dealias1(S12,S12_mu)
+        call dealias1(S13,S13_mu)
+        call dealias1(S22,S22_mu)
+        call dealias1(S23,S23_mu)
+        call dealias1(S33,S33_mu)
+
+        do k=2,nzb+1
+            S_mu(:,:,k)=sqrt(2*(S11_mu(:,:,k)**2+S22_mu(:,:,k)**2+ &
+            S33_mu(:,:,k)**2+2.*S12_mu(:,:,k)**2+ &
+                        2.*S13_mu(:,:,k)**2+2.*S23_mu(:,:,k)**2))
+        enddo
+
+    endif
+
+!.....##### SMAGORINSKY: skip this (not call Optim_cs -only for dynamic!)
+    IF(model > 1)then
+
+    !		Update SGS coefficients every cs_count************************
+        if (cst == cs_count) then
+                     
+            if (model == 2) then
+
+                if(averaging == 1)then
+
+                    call update1(a1_old)
+                    call update1(b1_old)
+
+                    call optim_lag_dyn(Cs2,S11,S33,S22,S12,S13,S23,S, &
+                    S_hat,u_,v_,w_,L,a1_old,b1_old)
+                endif
+
+            elseif(model == 3)then
+
+                if (averaging == 1) then
+
+                    call update9(a1_old,b1_old,c1_old,d1_old,e1_old, &
+                    a2_old,b2_old,c2_old,d2_old)
+                    call update1(e2_old)
+
+                    call optim_lag(Cs2,S11,S33,S22,S12,S13,S23,S,S_hat, &
+                    S_hatd,u_,v_,w_,l,beta1,a1_old,b1_old, &
+                    c1_old,d1_old,e1_old,a2_old,b2_old,c2_old,d2_old, &
+                    e2_old,TL)
+
+                else if (averaging == 0) then
+                    call optim_pln (Cs2,S11,S33,S22,S12,S13,S23,S,S_hat, &
+                    S_hatd,u_,v_,w_,L,beta1)
+
+                else if (averaging == 2) then
+                    call optim_loc (Cs2,S11,S33,S22,S12,S13,S23,S,S_hat, &
+                    S_hatd,u_,v_,w_,L,beta1)
+
+                else if (averaging == 3) then
+                    call optim_wong (Cs2,S11,S33,S22,S12,S13,S23,S,S_hat, &
+                    S_hatd,u_,v_,w_,L,beta1)
+
+                end if
+
+            endif !endif if(model == 2)/elseif(model == 3)
+
+        !     SGS Kinetic Energy Computation**************************
+            do k=2,nzb+1
+                do j=1,nyb
+                    do i=1,nx
+                        if (averaging == 3) then
+                            ESGS3D(i,j,k)=l(k)**(4./3.)*S(i,j,k)* &
+                            Cs2(i,j,k)/0.3
+                        else
+                            ESGS3D(i,j,k)=((l(k)*S(i,j,k))**2.0)* &
+                            Cs2(i,j,k)/0.3d0
+                        end if
+                    end do
+                end do
+            end do
+        !     ********************************************************
+        !     SGS Dissipation Computation*****************************
+            do k=2,nzb+1
+                do j=1,nyb
+                    do i=1,nx
+                        DSGS3D(i,j,k)=0.5d0*(l(k)*Cs2(i,j,k))**2*S(i,j,k)**3
+                    end do
+                end do
+            end do
+        !     ********************************************************
+
+        !	  Scalar computations of SGS Coefficients****************************
+            if(scalarCount >= 1)then
+                do ll=1,scalarCount
+
+                    if(scl_nodes == 0)then
+                        do k=2,nzb+1
+                            t_(:,:,k,ll)= 0.5*(scalar(:,:,k,ll) &
+                            + scalar(:,:,k-1,ll))
+                            tx(:,:,k,ll)= 0.5*(dsdx(:,:,k,ll) &
+                            + dsdx(:,:,k-1,ll))
+                            ty(:,:,k,ll)= 0.5*(dsdy(:,:,k,ll) &
+                            + dsdy(:,:,k-1,ll))
+                            tz(:,:,k,ll)=      dsdz(:,:,k,ll)
+                        enddo
+                    else
+                        do k=2,nzb+1
+                            t_(:,:,k,ll)=     scalar(:,:,k,ll)
+                            tx(:,:,k,ll)=      dsdx(:,:,k,ll)
+                            ty(:,:,k,ll)=      dsdy(:,:,k,ll)
+                            tz(:,:,k,ll)= 0.5*(dsdz(:,:,k,ll)+ &
+                            dsdz(:,:,k+1,ll))
+                        enddo
+                    endif
+                    if(vfact == 0 .AND. verticalBC == 0)then
+                        t_(:,:,2,ll)=scalar(:,:,2,ll)
+                        tx(:,:,2,ll)= dsdx(:,:,2,ll)
+                        ty(:,:,2,ll)= dsdy(:,:,2,ll)
+                        tz(:,:,2,ll)= dsdz(:,:,2,ll)
+                    endif
+
+                    if (ll == 1)then
+                        if(scl_nodes /= mom_nodes)then
+                            if(scl_nodes == 0)then
+                                do k=2,nzb+1
+                                    u_(:,:,k)=0.5*(u(:,:,k)+u(:,:,k-1))
+                                    v_(:,:,k)=0.5*(v(:,:,k)+v(:,:,k-1))
+                                    w_(:,:,k)=w(:,:,k)
+                                                            
+                                    ux(:,:,k)=0.5*(dudx(:,:,k)+dudx(:,:,k-1))
+                                    uy(:,:,k)=0.5*(dudy(:,:,k)+dudy(:,:,k-1))
+                                    uz(:,:,k)=     dudz(:,:,k)
+                                    vx(:,:,k)=0.5*(dvdx(:,:,k)+dvdx(:,:,k-1))
+                                    vy(:,:,k)=0.5*(dvdy(:,:,k)+dvdy(:,:,k-1))
+                                    vz(:,:,k)=     dvdz(:,:,k)
+                                    wx(:,:,k)=     dwdx(:,:,k)
+                                    wy(:,:,k)=     dwdy(:,:,k)
+                                    wz(:,:,k)=0.5*(dwdz(:,:,k)+dwdz(:,:,k-1))
+                                end do
+                            else
+                                do k=2,nzb+1
+                                    u_(:,:,k)=u(:,:,k)
+                                    v_(:,:,k)=v(:,:,k)
+                                    w_(:,:,k)=0.5*(w(:,:,k)+w(:,:,k+1))
+                                                            
+                                    ux(:,:,k)=     dudx(:,:,k)
+                                    uy(:,:,k)=     dudy(:,:,k)
+                                    uz(:,:,k)=0.5*(dudz(:,:,k)+dudz(:,:,k+1))
+                                    vx(:,:,k)=     dvdx(:,:,k)
+                                    vy(:,:,k)=     dvdy(:,:,k)
+                                    vz(:,:,k)=0.5*(dvdz(:,:,k)+dvdz(:,:,k+1))
+                                    wx(:,:,k)=0.5*(dwdx(:,:,k)+dwdx(:,:,k+1))
+                                    wy(:,:,k)=0.5*(dwdy(:,:,k)+dwdy(:,:,k+1))
+                                    wz(:,:,k)=     dwdz(:,:,k)
+                                enddo
+                            endif
+
+                            if (vfact == 0 .AND. verticalBC == 0) then
+                                u_(:,:,2)=    u(:,:,2)
+                                v_(:,:,2)=    v(:,:,2)
+                                w_(:,:,2)=0.5*w(:,:,3)
+                                                     
+                                ux(:,:,2)=     dudx(:,:,2)
+                                uy(:,:,2)=     dudy(:,:,2)
+                                uz(:,:,2)=     dudz(:,:,2)
+                                vx(:,:,2)=     dvdx(:,:,2)
+                                vy(:,:,2)=     dvdy(:,:,2)
+                                vz(:,:,2)=     dvdz(:,:,2)
+                                wx(:,:,2)=0.5*(dwdx(:,:,3)+dwdx(:,:,2))
+                                wy(:,:,2)=0.5*(dwdy(:,:,3)+dwdy(:,:,2))
+                                wz(:,:,2)=     dwdz(:,:,2)
+                            endif
+
+                            do k=2,Nzb+1
+                                S11(:,:,k)=0.5*(ux(:,:,k)+ux(:,:,k))
+                                S33(:,:,k)=0.5*(wz(:,:,k)+wz(:,:,k))
+                                S22(:,:,k)=0.5*(vy(:,:,k)+vy(:,:,k))
+                                S12(:,:,k)=0.5*(uy(:,:,k)+vx(:,:,k))
+                                S13(:,:,k)=0.5*(uz(:,:,k)+wx(:,:,k))
+                                S23(:,:,k)=0.5*(vz(:,:,k)+wy(:,:,k))
+                            enddo
+                                                            
+                        endif
+                    endif ! if ll==1 (only compute Sij once)
+
+                    if(model == 2)then
+                        if(averaging == 1)then
+
+                            call update1(a4_old(:,:,:,ll))
+                            call update1(b4_old(:,:,:,ll))
+
+                            call optim_scl_lag_dyn(Pr2(:,:,:,ll),S11,S33, &
+                            S22,S12,S13,S23,S_hat,u_,v_,w_,L, &
+                            t_(:,:,:,ll),tx(:,:,:,ll),ty(:,:,:,ll), &
+                            tz(:,:,:,ll),a4_old(:,:,:,ll), &
+                            b4_old(:,:,:,ll))
+
+                        endif
+                                          
+                    elseif(model == 3)then
+                        if (averaging == 1) then
+
+                            call update9(a4_old(:,:,:,ll),b4_old(:,:,:,ll), &
+                            c4_old(:,:,:,ll),d4_old(:,:,:,ll), &
+                            e4_old(:,:,:,ll),a8_old(:,:,:,ll), &
+                            b8_old(:,:,:,ll),c8_old(:,:,:,ll), &
+                            d8_old(:,:,:,ll))
+                            call update1(e8_old(:,:,:,ll))
+
+                                                  
+                            call optim_scl_lag(Pr2(:,:,:,ll), &
+                            S11,S33,S22,S12,S13,S23,S_hat,S_hatd,u_,v_, &
+                            w_,L,t_(:,:,:,ll),tx(:,:,:,ll), &
+                            ty(:,:,:,ll),tz(:,:,:,ll),beta2(:,:,:,ll), &
+                            a4_old(:,:,:,ll),b4_old(:,:,:,ll), &
+                            c4_old(:,:,:,ll),d4_old(:,:,:,ll), &
+                            e4_old(:,:,:,ll),a8_old(:,:,:,ll), &
+                            b8_old(:,:,:,ll),c8_old(:,:,:,ll), &
+                            d8_old(:,:,:,ll),e8_old(:,:,:,ll))
+                                            
+                                           
+                        else if (averaging == 0) then
+                            call optim_scl_pln(Pr2(:,:,:,ll),S11,S33,S22,S12,S13, &
+                            S23,S_hat,S_hatd,u_,v_,w_,L,t_(:,:,:,ll), &
+                            tx(:,:,:,ll),ty(:,:,:,ll),tz(:,:,:,ll), &
+                            beta2(:,:,:,ll))
+
+                        else if (averaging == 2) then
+                            call optim_scl_loc(Pr2(:,:,:,ll),S11,S33,S22,S12,S13, &
+                            S23,S_hat,S_hatd,u_,v_,w_,L,t_(:,:,:,ll), &
+                            tx(:,:,:,ll),ty(:,:,:,ll),tz(:,:,:,ll), &
+                            beta2(:,:,:,ll))
+
+                        else if (averaging == 3) then
+                            call optim_scl_wong(Pr2(:,:,:,ll),S11,S33,S22,S12,S13, &
+                            S23,S_hat,S_hatd,u_,v_,w_,L,t_(:,:,:,ll), &
+                            tx(:,:,:,ll),ty(:,:,:,ll),tz(:,:,:,ll), &
+                            beta2(:,:,:,ll))
+
+                        endif
+                    endif ! endif model=3, if(model == 3)then
+                enddo !end scalar do loop, do n=1,scalarCount
+
+            do k=2,nzb+1
+               if(vfact.eq.0)then
+
+                  Cs_ave=0.
+                  b1_ave=0.
+                  pr_ave=0.
+                  b2_ave=0.
+                  do j=1,Nyb
+                     do i=1,Nx
+                        Cs_ave=Cs_ave+Cs2(i,j,k)**0.5/(nx*nyb)
+                        pr_ave=pr_ave+Pr2(i,j,k)/(nx*nyb)
+                        if(beta1(i,j,k).gt.0)then
+                           b1_ave=b1_ave+beta1(i,j,k)/(nx*nyb- &
+                               neg_beta1(k)-lrg_beta1(k))
+                        endif
+                        if(beta2(i,j,k).gt.0)then
+                           b2_ave=b2_ave+beta2(i,j,k)/(nx*nyb- &
+                               neg_beta2(k)-lrg_beta2(k))
+                        endif
+                     enddo
+                  enddo
+                  print *, k-1+me*nzb,'Cs',Cs_ave, &
+                   Pr_ave
+               endif
+            enddo
+
+            endif ! endif of Scalar SGS coefficient computation if(scalarCount >= 1)then
+
+
+        !$$$            do k=2,nzb+1
+        !$$$               if(vfact.eq.0)then
+        !$$$
+        !$$$                  Cs_ave=0.
+        !$$$                  b1_ave=0.
+        !$$$                  pr_ave=0.
+        !$$$                  b2_ave=0.
+        !$$$                  do j=1,Nyb
+        !$$$                     do i=1,Nx
+        !$$$                        Cs_ave=Cs_ave+Cs2(i,j,k)**0.5/(nx*nyb)
+        !$$$                        pr_ave=pr_ave+Pr2(i,j,k)/(nx*nyb)
+        !$$$                        if(beta1(i,j,k).gt.0)then
+        !$$$                           b1_ave=b1_ave+beta1(i,j,k)/(nx*nyb-
+        !$$$     +                          neg_beta1(k)-lrg_beta1(k))
+        !$$$                        endif
+        !$$$                        if(beta2(i,j,k).gt.0)then
+        !$$$                           b2_ave=b2_ave+beta2(i,j,k)/(nx*nyb-
+        !$$$     +                          neg_beta2(k)-lrg_beta2(k))
+        !$$$                        endif
+        !$$$                     enddo
+        !$$$                  enddo
+        !$$$                  print *, k-1+me*nzb,'Cs',Cs_ave,
+        !$$$     +              Pr_ave
+        !$$$               endif
+        !$$$
+        !$$$            enddo
+        !			The above group of comments shoul be above the last endif when
+        !			added back into the code****************************
+
+                     
+        !        ... Richardson number criteria***************
+            if (scalarCount >= 1)then
+                do ll=1,scalarCount
+                    if (Ri_flag == 1) then
+                        if (scalarFlags(ll) == 1) then
+                            do k=2,Nzb+1
+                                do j=1,Nyb
+                                    do i=1,Nx
+                                    !                     ??originally theta_0 = 305.d0/Tscale
+                                    !						where Tscale = 300.d0
+                                    !                       as defined in dimen.h and Rip(i,j,k) =
+                                    !                       Rip(i,j,k)=(g_hat/(theta_0/Tscale))*
+                                    !     +                       tz(i,j,k,n)/(S(i,j,k)**2.)
+                                        Rip(i,j,k)=(g_hat/(theta_0/scalarScales(ll)))* &
+                                        tz(i,j,k,ll)/(S(i,j,k)**2.)
+                                        if(Rip(i,j,k) > (Cs2(i,j,k)/Pr2(i,j,k,ll)))then
+                                            Cs2(i,j,k)=0.
+                                            Pr2(i,j,k,ll)=0.
+                                        end if
+                                    end do
+                                end do
+                            end do
+                        end if
+                    end if
+                enddo
+            endif
+        !         *******************************************
+
+            call dealias1(Cs2,Cs2_m)
+            call update1(Cs2_m)
+            if(scalarCount >= 1)then
+                do ll=1,scalarCount
+                    call dealias1(Pr2(:,:,:,ll),Pr2_m(:,:,:,ll))
+                    call update1(Pr2_m(:,:,:,ll))
+                enddo
+            endif
+            	      
+            cst=1
+            	      
+        else
+                     
+            cst=cst+1
+
+        endif !if (cst == cs_count) then
+
+    ENDIF !IF(model >= 1)
+             
+    if(mom_nodes == 1)then
+        do k=2,nzb+1
+            ux(:,:,k)=0.5*(dudx(:,:,k)+dudx(:,:,k-1))
+            uy(:,:,k)=0.5*(dudy(:,:,k)+dudy(:,:,k-1))
+            uz(:,:,k)=     dudz(:,:,k)
+            vx(:,:,k)=0.5*(dvdx(:,:,k)+dvdx(:,:,k-1))
+            vy(:,:,k)=0.5*(dvdy(:,:,k)+dvdy(:,:,k-1))
+            vz(:,:,k)=     dvdz(:,:,k)
+            wx(:,:,k)=     dwdx(:,:,k)
+            wy(:,:,k)=     dwdy(:,:,k)
+            wz(:,:,k)=0.5*(dwdz(:,:,k)+dwdz(:,:,k-1))
+        end do
+    else
+        do k=2,nzb+1
+            ux(:,:,k)=     dudx(:,:,k)
+            uy(:,:,k)=     dudy(:,:,k)
+            uz(:,:,k)=0.5*(dudz(:,:,k)+dudz(:,:,k+1))
+            vx(:,:,k)=     dvdx(:,:,k)
+            vy(:,:,k)=     dvdy(:,:,k)
+            vz(:,:,k)=0.5*(dvdz(:,:,k)+dvdz(:,:,k+1))
+            wx(:,:,k)=0.5*(dwdx(:,:,k)+dwdx(:,:,k+1))
+            wy(:,:,k)=0.5*(dwdy(:,:,k)+dwdy(:,:,k+1))
+            wz(:,:,k)=     dwdz(:,:,k)
+        end do
+    endif
+          
+    if (vfact == 0 .AND. verticalBC == 0) then
+        ux(:,:,2)=     dudx(:,:,2)
+        uy(:,:,2)=     dudy(:,:,2)
+        uz(:,:,2)=     dudz(:,:,2)
+        vx(:,:,2)=     dvdx(:,:,2)
+        vy(:,:,2)=     dvdy(:,:,2)
+        vz(:,:,2)=     dvdz(:,:,2)
+        wx(:,:,2)=0.5*(dwdx(:,:,3)+dwdx(:,:,2))
+        wy(:,:,2)=0.5*(dwdy(:,:,3)+dwdy(:,:,2))
+        wz(:,:,2)=     dwdz(:,:,2)
+    endif
+          
+    do k=2,Nzb+1
+        S11(:,:,k)=0.5*(ux(:,:,k)+ux(:,:,k))
+        S33(:,:,k)=0.5*(wz(:,:,k)+wz(:,:,k))
+        S22(:,:,k)=0.5*(vy(:,:,k)+vy(:,:,k))
+        S12(:,:,k)=0.5*(uy(:,:,k)+vx(:,:,k))
+        S13(:,:,k)=0.5*(uz(:,:,k)+wx(:,:,k))
+        S23(:,:,k)=0.5*(vz(:,:,k)+wy(:,:,k))
+    end do
+          
+    if(mom_nodes == 1)then
+
+        call dealias1(S11,S11_m)
+        call dealias1(S12,S12_m)
+        call dealias1(S13,S13_m)
+        call dealias1(S22,S22_m)
+        call dealias1(S23,S23_m)
+        call dealias1(S33,S33_m)
+
+        do k=2,nzb+1
+            S_m(:,:,k)=sqrt(2*(S11_m(:,:,k)**2+S22_m(:,:,k)**2+ &
+            S33_m(:,:,k)**2+2.*S12_m(:,:,k)**2+2.*S13_m(:,:,k)**2+ &
+            &            2.*S23_m(:,:,k)**2))
+        enddo
+                 
+    else
+        call dealias1(S11,S11_mu)
+        call dealias1(S12,S12_mu)
+        call dealias1(S13,S13_mu)
+        call dealias1(S22,S22_mu)
+        call dealias1(S23,S23_mu)
+        call dealias1(S33,S33_mu)
+
+        do k=2,nzb+1
+            S_mu(:,:,k)=sqrt(2*(S11_mu(:,:,k)**2+S22_mu(:,:,k)**2+ &
+            S33_mu(:,:,k)**2+2.*S12_mu(:,:,k)**2+ &
+            &            2.*S13_mu(:,:,k)**2+2.*S23_mu(:,:,k)**2))
+        enddo
+                 
+    endif
+
+! ccccccccccccccccccccccccccccccccccccccccccccccccc
+    if(scalarCount >= 1)then
+        do ll=1,scalarCount
+            call dealias1(dsdx(:,:,:,ll),tx_m(:,:,:,ll))
+            call dealias1(dsdy(:,:,:,ll),ty_m(:,:,:,ll))
+            call dealias1(dsdz(:,:,:,ll),tz_m(:,:,:,ll))
+        enddo
+    endif
+! ccccccccccccccccccccccccccccccccccccccccccccccccc
+
+    do k=2,Nzb+1
+
+        if(vfact == 0 .AND. k == 2 .AND. verticalBC == 0)then
+                        
+        !     ... Wong-Lilly Model************************
+            if(averaging == 3) then
+                               
+                txx_m(:,:,k)=-2.*Cs2_m(:,:,k)* &
+                l(k)**(4./3.)*S11_mu(:,:,k)
+                tyy_m(:,:,k)=-2.*Cs2_m(:,:,k)* &
+                l(k)**(4./3.)*S22_mu(:,:,k)
+                tzz_m(:,:,k)=-2.*Cs2_m(:,:,k)* &
+                l(k)**(4./3.)*S33_mu(:,:,k)
+                txy_m(:,:,k)=-2.*Cs2_m(:,:,k)* &
+                l(k)**(4./3.)*S12_mu(:,:,k)
+            !     ... Smagorinsky Model***********************
+            else
+                txx_m(:,:,k)=-2.*(Cs2_m(:,:,k)* &
+                l(k)**2.*S_mu(:,:,k)+Re_inv)*S11_mu(:,:,k)
+                tyy_m(:,:,k)=-2.*(Cs2_m(:,:,k)* &
+                l(k)**2.*S_mu(:,:,k)+Re_inv)*S22_mu(:,:,k)
+                tzz_m(:,:,k)=-2.*(Cs2_m(:,:,k)* &
+                l(k)**2.*S_mu(:,:,k)+Re_inv)*S33_mu(:,:,k)
+                txy_m(:,:,k)=-2.*(Cs2_m(:,:,k)* &
+                l(k)**2.*S_mu(:,:,k)+Re_inv)*S12_mu(:,:,k)
+            !$$$               txx_m(:,:,k)=-2.*Cs2_m(:,:,k)*
+            !$$$     +              l(k)**2.*S_mu(:,:,k)*S11_mu(:,:,k)
+            !$$$               tyy_m(:,:,k)=-2.*Cs2_m(:,:,k)*
+            !$$$     +              l(k)**2.*S_mu(:,:,k)*S22_mu(:,:,k)
+            !$$$               tzz_m(:,:,k)=-2.*Cs2_m(:,:,k)*
+            !$$$     +              l(k)**2.*S_mu(:,:,k)*S33_mu(:,:,k)
+            !$$$               txy_m(:,:,k)=-2.*Cs2_m(:,:,k)*
+            !$$$     +              l(k)**2.*S_mu(:,:,k)*S12_mu(:,:,k)
+                               
+            end if
+                 
+
+            if(scalarCount >= 1)then
+                do ll=1,scalarCount
+                !     ... Wong-Lilly Model************************
+                    if(averaging == 3) then
+                        qx_m(:,:,k,ll)=-(Pr2_m(:,:,k,ll))* &
+                        (l(k)**(4./3.))*tx_m(:,:,k,ll)
+                        qy_m(:,:,k,ll)=-(Pr2_m(:,:,k,ll))* &
+                        (l(k)**(4./3.))*ty_m(:,:,k,ll)
+                        	
+                    !     ... Smagorinsky Model***********************
+                    else
+                        qx_m(:,:,k,ll)=-(Pr2_m(:,:,k,ll))* &
+                        (l(k)**2.)*(S_mu(:,:,k)*tx_m(:,:,k,ll))
+                        qy_m(:,:,k,ll)=-(Pr2_m(:,:,k,ll))* &
+                        (l(k)**2.)*(S_mu(:,:,k)*ty_m(:,:,k,ll))
+                    end if
+                enddo
+            endif
+
+        else
+
+            if(mom_nodes == 0)then
+                Cs2_L=0.5*(Cs2_m(:,:,k)+Cs2_m(:,:,k+1))
+            else
+                Cs2_L=Cs2_m(:,:,k)
+            endif
+
+        !     ... Wong-Lilly Model************************
+            if(averaging == 3) then
+
+                txx_m(:,:,k)=-2.*Cs2_L* &
+                &                  0.5*(l(k)**(4./3.)+l(k+1)**(4./3.))* &
+                S11_mu(:,:,k)
+                tyy_m(:,:,k)=-2.*Cs2_L* &
+                &                  0.5*(l(k)**(4./3.)+l(k+1)**(4./3.))* &
+                S22_mu(:,:,k)
+                tzz_m(:,:,k)=-2.*Cs2_L* &
+                &                  0.5*(l(k)**(4./3.)+l(k+1)**(4./3.))* &
+                S33_mu(:,:,k)
+                txy_m(:,:,k)=-2.*Cs2_L* &
+                &                  0.5*(l(k)**(4./3.)+l(k+1)**(4./3.))* &
+                S12_mu(:,:,k)
+
+            !     ... Smagorinsky Model***********************
+            else
+                txx_m(:,:,k)=-2.*(Cs2_L* &
+                &                  0.5*(l(k)**2.+l(k+1)**2.)* &
+                S_mu(:,:,k)+Re_inv)*S11_mu(:,:,k)
+                tyy_m(:,:,k)=-2.*(Cs2_L* &
+                &                  0.5*(l(k)**2.+l(k+1)**2.)* &
+                S_mu(:,:,k)+Re_inv)*S22_mu(:,:,k)
+                tzz_m(:,:,k)=-2.*(Cs2_L* &
+                &                  0.5*(l(k)**2.+l(k+1)**2.)* &
+                S_mu(:,:,k)+Re_inv)*S33_mu(:,:,k)
+                txy_m(:,:,k)=-2.*(Cs2_L* &
+                &                  0.5*(l(k)**2.+l(k+1)**2.)* &
+                S_mu(:,:,k)+Re_inv)*S12_mu(:,:,k)
+            !$$$                  txx_m(:,:,k)=-2.*(Cs2_L*
+            !$$$     +                 0.5*(l(k)**2.+l(k+1)**2.)*
+            !$$$     +                 S_mu(:,:,k))*S11_mu(:,:,k)
+            !$$$                  tyy_m(:,:,k)=-2.*(Cs2_L*
+            !$$$     +                 0.5*(l(k)**2.+l(k+1)**2.)*
+            !$$$     +                 S_mu(:,:,k))*S22_mu(:,:,k)
+            !$$$                  tzz_m(:,:,k)=-2.*(Cs2_L*
+            !$$$     +                 0.5*(l(k)**2.+l(k+1)**2.)*
+            !$$$     +                 S_mu(:,:,k))*S33_mu(:,:,k)
+            !$$$                  txy_m(:,:,k)=-2.*(Cs2_L*
+            !$$$     +                 0.5*(l(k)**2.+l(k+1)**2.)*
+            !$$$     +                 S_mu(:,:,k))*S12_mu(:,:,k)
+
+            end if
+
+            if(scalarCount >= 1)then
+                do ll=1,scalarCount
+                    if(scl_nodes == 0)then
+                        Pr2_L = 0.5*(Pr2_m(:,:,k,ll) &
+                        + Pr2_m(:,:,k+1,ll))
+                    else
+                        Pr2_L = Pr2_m(:,:,k,ll)
+                    endif
+                    	
+                !     ... Wong-Lilly Model************************
+                    if(averaging == 3) then
+                        	
+                        qx_m(:,:,k,ll)=-Pr2_L* &
+                        &                  		0.5*(l(k)**(4./3.)+l(k+1)**(4./3.))* &
+                        tx_m(:,:,k,ll)
+                        qy_m(:,:,k,ll)=-Pr2_L* &
+                        &                  		0.5*(l(k)**(4./3.)+l(k+1)**(4./3.))* &
+                        ty_m(:,:,k,ll)
+                        	
+                    !     ... Smagorinsky Model***********************
+                    else
+                        qx_m(:,:,k,ll)=-Pr2_L* &
+                        &                  		0.5*(l(k)**2.+l(k+1)**2.)* &
+                        S_mu(:,:,k)*tx_m(:,:,k,ll)
+                        qy_m(:,:,k,ll)=-Pr2_L* &
+                        &                  		0.5*(l(k)**2.+l(k+1)**2.)* &
+                        S_mu(:,:,k)*ty_m(:,:,k,ll)
+                    endif
+                enddo
+            end if
+
+        endif
+                
+    end do
+
+    do k=2,nzb+1
+            
+        if(mom_nodes == 1)then
+            Cs2_L=0.5*(Cs2_m(:,:,k)+Cs2_m(:,:,k-1))
+        else
+            Cs2_L=Cs2_m(:,:,k)
+        endif
+
+    !     ... Wong-Lilly Model************************
+        if(averaging == 3) then
+
+            txz_m(:,:,k)=-2.*Cs2_L*l(k)**(4./3.)* &
+            S13_m(:,:,k)
+            tyz_m(:,:,k)=-2.*Cs2_L*l(k)**(4./3.)* &
+            S23_m(:,:,k)
+                     
+        !     ... Smagorinsky Model***********************
+        else
+            txz_m(:,:,k)=-2.*(Cs2_L*l(k)**2.* &
+            S_m(:,:,k)+Re_inv)*S13_m(:,:,k)
+            tyz_m(:,:,k)=-2.*(Cs2_L*l(k)**2.* &
+            S_m(:,:,k)+Re_inv)*S23_m(:,:,k)
+        !$$$                  txz_m(:,:,k)=-2.*(Cs2_L*l(k)**2.*
+        !$$$     +                 S_m(:,:,k))*S13_m(:,:,k)
+        !$$$                  tyz_m(:,:,k)=-2.*(Cs2_L*l(k)**2.*
+        !$$$     +                 S_m(:,:,k))*S23_m(:,:,k)
+
+        end if
+                 
+        if(scalarCount >= 1)then
+            do ll=1,scalarCount
+                if(scl_nodes == 1)then
+                    Pr2_L=0.5*(Pr2_m(:,:,k,ll) + &
+                    Pr2_m(:,:,k-1,ll))
+                else
+                    Pr2_L=Pr2_m(:,:,k,ll)
+                endif
+                if (vfact == 0 .AND. k == 2 .AND. verticalBC == 0)then
+                    	
+                !     ... Wong-Lilly Model************************
+                    if(averaging == 3) then
+                        qz_m(:,:,k,ll)=-Pr2_m(:,:,k,ll)* &
+                        l(k)**(4./3.)*tz_m(:,:,k,ll)
+                    !     ... Smagorinsky Model***********************
+                    else
+                        qz_m(:,:,k,ll)=-Pr2_m(:,:,k,ll)* &
+                        l(k)**2*S_mu(:,:,k)*tz_m(:,:,k,ll)
+                    end if
+                else
+                !     ... Wong-Lilly Model************************
+                    if(averaging == 3) then
+                        qz_m(:,:,k,ll)=-Pr2_L* &
+                        (l(k)**(4./3.))*tz_m(:,:,k,ll)
+                    !     ... Smagorinsky Model***********************
+                    else
+                        qz_m(:,:,k,ll)=-Pr2_L* &
+                        (l(k)**2.)*(S_m(:,:,k)*tz_m(:,:,k,ll))
+                    end if
+                end if
+            enddo
+        endif
+
+    end do
+
+    if (vfact == vprocs-1 .AND. verticalBC == 0) then
+        do k=(nzb+1),(nzb+2)
+            txz_m(:,:,k)=0.
+            tyz_m(:,:,k)=0.
+            tzz_m(:,:,k)=0.
+            txx_m(:,:,k)=0.
+            txy_m(:,:,k)=0.
+            tyy_m(:,:,k)=0.
+            if(scalarCount >= 1)then
+                do ll=1,scalarCount
+                    qz_m(:,:,k,ll)=0.
+                enddo
+            endif
+        end do
+    endif
+
+    call dealias2(txx,txx_m)
+    call dealias2(txy,txy_m)
+    call dealias2(txz,txz_m)
+    call dealias2(tyy,tyy_m)
+    call dealias2(tyz,tyz_m)
+
+    if(scalarCount >= 1)then
+        do ll=1,scalarCount
+            call dealias2(qx(:,:,:,ll),qx_m(:,:,:,ll))
+            call dealias2(qy(:,:,:,ll),qy_m(:,:,:,ll))
+            call dealias2(qz(:,:,:,ll),qz_m(:,:,:,ll))
+        enddo
+        call dealias2(tzz,tzz_m)
+    else
+        call dealias2(tzz,tzz_m)
+    endif
+
+    call update3(txz,tyz,tzz)
+
+    if (vfact == 0 .AND. verticalBC == 0) then
+        txz(:,:,2)=txzp
+        tyz(:,:,2)=tyzp
+    endif
+
+!    SGS Scalar Variance computation*****************
+    if (cst == 1)then ! update SGS variance only when sgs coef are updated
+        if (scalarCount >= 1) then
+            do ll=1,scalarCount
+                call update3(qx(:,:,:,ll),qy(:,:,:,ll), &
+                qz(:,:,:,ll))
+                do k=2,nzb+1
+                    do j=1,nyb
+                        do i=1,nx
+                            ESCL3D(i,j,k,ll)=sqrt((0.5*(qx(i,j,k,ll) &
+                            + qx(i,j,k-1,ll)))**2. &
+                            + (0.5*(qy(i,j,k,ll) &
+                            + qy(i,j,k-1,ll)))**2. &
+                            + qz(i,j,k,ll)**2.)
+                        enddo
+                    enddo
+                enddo
+            enddo
+        endif
+    endif
+!     ************************************************
+    return
+          
+    end Subroutine SGS_STAG
+
+
+
+
+
+
+
+
